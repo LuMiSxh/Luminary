@@ -11,11 +11,13 @@ import (
 )
 
 var (
-	searchAgent  string
-	searchLimit  int
-	searchSort   string
-	searchFields []string
-	fieldFilters map[string]string
+	searchAgent      string
+	searchLimit      int
+	searchSort       string
+	searchFields     []string
+	fieldFilters     map[string]string
+	includeAltTitles bool
+	includeAllLangs  bool
 )
 
 // searchCmd represents the search command
@@ -102,6 +104,15 @@ var searchCmd = &cobra.Command{
 				fmt.Println("Search fields: all")
 			}
 
+			// Display search options
+			if includeAltTitles {
+				fmt.Println("Searching in alternative titles: enabled")
+			}
+			if includeAllLangs {
+				fmt.Println("Searching across all languages: enabled")
+			}
+			fmt.Printf("Result limit: %d\n", searchLimit)
+
 			// Display field-specific filters
 			if len(fieldFilters) > 0 {
 				fmt.Println("Filters:")
@@ -152,6 +163,29 @@ func displaySearchResults(results []agents.Manga, agent agents.Agent) {
 	fmt.Printf("  Found %d results:\n", len(results))
 	for i, manga := range results {
 		fmt.Printf("  %d. %s (ID: %s:%s)\n", i+1, manga.Title, agent.ID(), manga.ID)
+
+		// Display alternative titles if available
+		if len(manga.AltTitles) > 0 {
+			// Deduplicate alternative titles (in case the same title appears in multiple languages)
+			uniqueTitles := make(map[string]bool)
+			var displayTitles []string
+
+			for _, title := range manga.AltTitles {
+				if !uniqueTitles[title] {
+					uniqueTitles[title] = true
+					displayTitles = append(displayTitles, title)
+				}
+			}
+
+			if len(displayTitles) > 0 {
+				// Show up to 3 alternative titles
+				fmt.Printf("     Also known as: %s\n", strings.Join(displayTitles[:minInt(3, len(displayTitles))], ", "))
+				if len(displayTitles) > 3 {
+					fmt.Printf("     ...and %d more alternative titles\n", len(displayTitles)-3)
+				}
+			}
+		}
+
 		if len(manga.Authors) > 0 {
 			fmt.Printf("     Authors: %s\n", strings.Join(manga.Authors, ", "))
 		}
@@ -180,6 +214,8 @@ func init() {
 	searchCmd.Flags().IntVar(&searchLimit, "limit", 10, "Limit number of results")
 	searchCmd.Flags().StringVar(&searchSort, "sort", "relevance", "Sort by (relevance, popularity, name)")
 	searchCmd.Flags().StringSliceVar(&searchFields, "fields", []string{}, "Fields to search in (title, author, genre), empty means all")
+	searchCmd.Flags().BoolVar(&includeAltTitles, "alt-titles", true, "Include alternative titles in search")
+	searchCmd.Flags().BoolVar(&includeAllLangs, "all-langs", true, "Search across all language versions of titles")
 
 	// Field-specific filters
 	fieldFilters = make(map[string]string)

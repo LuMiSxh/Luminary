@@ -44,6 +44,7 @@ type Manga struct {
 	Authors     []string
 	Status      string
 	Tags        []string
+	AltTitles   []string
 }
 
 // MangaInfo contains detailed manga information

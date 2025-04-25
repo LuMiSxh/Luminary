@@ -75,3 +75,5 @@ func (b *BaseAgent) Wait(isAPI bool) {
 func (b *BaseAgent) CanHandleURI(uri string) bool {
 	return false // Base implementation can't handle any URI
 }
+
+// TODO: Implement https://github.com/manga-download/hakuneko/blob/master/src/web/mjs/connectors/KissmangaORG.mjs

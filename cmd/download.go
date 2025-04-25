@@ -76,7 +76,7 @@ var downloadCmd = &cobra.Command{
 			cancel()
 
 			if err != nil {
-				fmt.Fprintf(os.Stderr, "Error downloading chapter: %v\n", err)
+				_, _ = fmt.Fprintf(os.Stderr, "Error downloading chapter: %v\n", err)
 				return
 			}
 

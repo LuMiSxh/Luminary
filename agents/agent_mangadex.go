@@ -125,13 +125,14 @@ func (m *MangaDex) Search(ctx context.Context, query string, options SearchOptio
 		return nil, fmt.Errorf("API returned status %d", resp.StatusCode)
 	}
 
-	// Parse the response
+	// Parse the response with proper structure for titles
 	var response struct {
 		Data []struct {
 			ID         string `json:"id"`
 			Attributes struct {
-				Title       map[string]string `json:"title"`
-				Description map[string]string `json:"description"`
+				Title       map[string]string   `json:"title"`
+				AltTitles   []map[string]string `json:"altTitles"`
+				Description map[string]string   `json:"description"`
 				Tags        []struct {
 					Attributes struct {
 						Name map[string]string `json:"name"`
@@ -161,14 +162,34 @@ func (m *MangaDex) Search(ctx context.Context, query string, options SearchOptio
 		if enTitle, ok := item.Attributes.Title["en"]; ok {
 			title = enTitle
 		} else {
+			// If no English title, try other languages
 			for _, t := range item.Attributes.Title {
 				title = t
-				break
+				break // Take the first one we find
 			}
 		}
 
 		if title == "" {
-			continue
+			continue // Skip entries with no title
+		}
+
+		// Extract all alternative titles
+		var altTitles []string
+
+		// Process all language variants from the main title
+		for _, t := range item.Attributes.Title {
+			if t != title { // Don't include the main title again
+				altTitles = append(altTitles, t)
+			}
+		}
+
+		// Process all entries in altTitles array
+		for _, titleMap := range item.Attributes.AltTitles {
+			for _, t := range titleMap {
+				if t != title && t != "" { // Avoid duplicates and empty strings
+					altTitles = append(altTitles, t)
+				}
+			}
 		}
 
 		// Extract description
@@ -204,6 +225,7 @@ func (m *MangaDex) Search(ctx context.Context, query string, options SearchOptio
 		manga := Manga{
 			ID:          item.ID,
 			Title:       title,
+			AltTitles:   altTitles,
 			Description: description,
 			Status:      item.Attributes.Status,
 			Tags:        tags,
@@ -241,9 +263,6 @@ func (m *MangaDex) GetManga(ctx context.Context, id string) (*MangaInfo, error) 
 		}
 	}(resp.Body)
 
-	// Parse basic manga info
-	// (Implementation omitted for brevity - similar to Search method)
-
 	// Fetch chapter list
 	chapters, err := m.getChapterList(ctx, id)
 	if err != nil {
@@ -251,10 +270,11 @@ func (m *MangaDex) GetManga(ctx context.Context, id string) (*MangaInfo, error) 
 	}
 
 	// Create MangaInfo with chapters
+	// TODO: Parse the response to get the manga title, description, etc.
 	return &MangaInfo{
 		Manga: Manga{
 			ID:          id,
-			Title:       "Example Manga", // Replace with actual data
+			Title:       "Example Manga",
 			Description: "Example description",
 		},
 		Chapters: chapters,

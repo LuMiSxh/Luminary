@@ -59,7 +59,7 @@ var agentsCmd = &cobra.Command{
 			}
 
 			fmt.Println("")
-			fmt.Println("Use --agent flag with search/read commands to specify a particular agent")
+			fmt.Println("Use --agent flag with the search command to specify a particular agent")
 		}
 	},
 }
