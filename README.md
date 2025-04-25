@@ -17,7 +17,7 @@ Luminary helps you find and download manga from different providers through a si
 
 ```bash
 # Clone the repository
-git clone https://github.com/yourusername/Luminary.git
+git clone https://github.com/lumisxh/Luminary.git
 
 # Build the application
 cd Luminary
@@ -25,6 +25,13 @@ go build
 
 # Optional: Add to your PATH
 ```
+
+### Download Release
+
+You can also download pre-built binaries from the [releases page]()
+on GitHub. Choose the appropriate binary for your operating system and architecture.
+
+** NOTE: _This is not yet available_ **
 
 ## Usage
 
