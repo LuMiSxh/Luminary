@@ -1,14 +1,17 @@
 package cmd
 
 import (
-	"Luminary/pkg"
+	"Luminary/agents"
+	"context"
 	"fmt"
+	"time"
 
 	"github.com/spf13/cobra"
 )
 
 var (
 	listAgent string
+	listLimit int
 )
 
 var listCmd = &cobra.Command{
@@ -16,36 +19,100 @@ var listCmd = &cobra.Command{
 	Short: "List all available manga",
 	Long:  `List all manga from all agents or a specific agent.`,
 	Run: func(cmd *cobra.Command, args []string) {
+		ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+		defer cancel()
+
 		// Validate the agent if specified
+		var selectedAgent agents.Agent
 		if listAgent != "" {
-			agent := pkg.GetAgentByID(listAgent)
-			if agent == nil {
+			selectedAgent = agents.Get(listAgent)
+			if selectedAgent == nil {
 				fmt.Printf("Error: Agent '%s' not found\n", listAgent)
 				fmt.Println("Available agents:")
-				for _, a := range pkg.GetAgents() {
-					fmt.Printf("  - %s (%s)\n", a.ID, a.Name)
+				for _, a := range agents.All() {
+					fmt.Printf("  - %s (%s)\n", a.ID(), a.Name())
 				}
 				return
 			}
 		}
 
 		if apiMode {
-			// Output machine-readable JSON for Palaxy
-			fmt.Println(`{"mangas":[]}`) // Placeholder
+			fmt.Print(`{"mangas":[`)
+			resultCount := 0
+
+			// Function to list manga from a single agent
+			listAgentMangas := func(agent agents.Agent) {
+				// Use empty search to get list of manga
+				mangas, err := agent.Search(ctx, "", agents.SearchOptions{Limit: listLimit})
+				if err != nil {
+					return
+				}
+
+				for _, manga := range mangas {
+					if resultCount > 0 {
+						fmt.Print(",")
+					}
+					fmt.Printf(`{"id":"%s","title":"%s","agent":"%s"}`,
+						manga.ID, manga.Title, agent.ID())
+					resultCount++
+				}
+			}
+
+			if selectedAgent != nil {
+				listAgentMangas(selectedAgent)
+			} else {
+				// List manga from all agents
+				for _, agent := range agents.All() {
+					listAgentMangas(agent)
+				}
+			}
+
+			fmt.Println(`]}`)
 		} else {
 			// Interactive mode for CLI users
-			fmt.Println("Listing manga...")
-			if listAgent != "" {
-				fmt.Printf("From agent: %s\n", listAgent)
+			if selectedAgent != nil {
+				fmt.Printf("Listing manga from agent: %s (%s)\n\n", selectedAgent.ID(), selectedAgent.Name())
+
+				// Use empty search to get list of manga
+				mangas, err := selectedAgent.Search(ctx, "", agents.SearchOptions{Limit: listLimit})
+				if err != nil {
+					fmt.Printf("Error: %v\n", err)
+					return
+				}
+
+				displayMangaList(mangas, selectedAgent)
 			} else {
-				fmt.Println("From all agents")
-				fmt.Println("Available agents:")
-				for _, a := range pkg.GetAgents() {
-					fmt.Printf("  - %s (%s)\n", a.ID, a.Name)
+				fmt.Println("Listing manga from all agents:")
+
+				for _, agent := range agents.All() {
+					fmt.Printf("\nFrom agent: %s (%s)\n", agent.ID(), agent.Name())
+
+					// Use empty search to get list of manga
+					mangas, err := agent.Search(ctx, "", agents.SearchOptions{Limit: listLimit})
+					if err != nil {
+						fmt.Printf("  Error: %v\n", err)
+						continue
+					}
+
+					displayMangaList(mangas, agent)
 				}
 			}
 		}
 	},
+}
+
+// Helper function to display manga list in a user-friendly format
+func displayMangaList(mangas []agents.Manga, agent agents.Agent) {
+	if len(mangas) == 0 {
+		fmt.Println("  No manga found")
+		return
+	}
+
+	for i, manga := range mangas {
+		fmt.Printf("  %d. %s (ID: %s:%s)\n", i+1, manga.Title, agent.ID(), manga.ID)
+	}
+
+	fmt.Printf("\n  Found %d manga titles\n", len(mangas))
 }
 
 func init() {
@@ -53,4 +120,5 @@ func init() {
 
 	// Flags
 	listCmd.Flags().StringVar(&listAgent, "agent", "", "Specific agent to list manga from (default: all)")
+	listCmd.Flags().IntVar(&listLimit, "limit", 50, "Limit number of results per agent")
 }

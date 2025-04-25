@@ -1,9 +1,11 @@
 package cmd
 
 import (
-	"Luminary/pkg"
+	"Luminary/agents"
+	"context"
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/spf13/cobra"
 )
@@ -24,34 +26,81 @@ var searchCmd = &cobra.Command{
 	Args:  cobra.ExactArgs(1),
 	Run: func(cmd *cobra.Command, args []string) {
 		query := args[0]
+		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+		defer cancel()
 
 		// Validate the agent if specified
+		var selectedAgent agents.Agent
 		if searchAgent != "" {
-			agent := pkg.GetAgentByID(searchAgent)
-			if agent == nil {
+			selectedAgent = agents.Get(searchAgent)
+			if selectedAgent == nil {
 				fmt.Printf("Error: Agent '%s' not found\n", searchAgent)
 				fmt.Println("Available agents:")
-				for _, a := range pkg.GetAgents() {
-					fmt.Printf("  - %s (%s)\n", a.ID, a.Name)
+				for _, a := range agents.All() {
+					fmt.Printf("  - %s (%s)\n", a.ID(), a.Name())
 				}
 				return
 			}
 		}
 
-		// Determine which fields to search (defaults to all if none specified)
-		fieldsToSearch := searchFields
-		if len(fieldsToSearch) == 0 {
-			fieldsToSearch = []string{"title", "genre", "author"}
+		// Create search options from flags
+		options := agents.SearchOptions{
+			Limit:   searchLimit,
+			Fields:  searchFields,
+			Filters: fieldFilters,
+			Sort:    searchSort,
 		}
 
 		if apiMode {
-			// Output machine-readable JSON for Palaxy
-			fmt.Printf(`{"results":[{"id":"manga-1","title":"Example Manga matching '%s'","agent":"mangadex","searchFields":%q,"filters":%q}]}`,
-				query, strings.Join(fieldsToSearch, ","), fieldFilters)
+			// When a specific agent is selected
+			if selectedAgent != nil {
+				results, err := selectedAgent.Search(ctx, query, options)
+				if err != nil {
+					fmt.Printf(`{"error": "%s"}`, err)
+					return
+				}
+
+				// Output machine-readable JSON
+				fmt.Print(`{"results":[`)
+				for i, manga := range results {
+					if i > 0 {
+						fmt.Print(",")
+					}
+					fmt.Printf(`{"id":"%s","title":"%s","agent":"%s"}`,
+						manga.ID, manga.Title, selectedAgent.ID())
+				}
+				fmt.Println(`]}`)
+			} else {
+				// When searching across all agents, we combine results
+				fmt.Print(`{"results":[`)
+				resultCount := 0
+
+				for _, agent := range agents.All() {
+					results, err := agent.Search(ctx, query, options)
+					if err != nil {
+						continue // Skip agents with errors
+					}
+
+					for _, manga := range results {
+						if resultCount > 0 {
+							fmt.Print(",")
+						}
+						fmt.Printf(`{"id":"%s","title":"%s","agent":"%s"}`,
+							manga.ID, manga.Title, agent.ID())
+						resultCount++
+					}
+				}
+				fmt.Println(`]}`)
+			}
 		} else {
 			// Interactive mode for CLI users
 			fmt.Printf("Searching for: %s\n", query)
-			fmt.Printf("Search fields: %s\n", strings.Join(fieldsToSearch, ", "))
+
+			if len(searchFields) > 0 {
+				fmt.Printf("Search fields: %s\n", strings.Join(searchFields, ", "))
+			} else {
+				fmt.Println("Search fields: all")
+			}
 
 			// Display field-specific filters
 			if len(fieldFilters) > 0 {
@@ -61,24 +110,66 @@ var searchCmd = &cobra.Command{
 				}
 			}
 
-			// Display additional settings and agent info
-			if searchAgent != "" {
-				agent := pkg.GetAgentByID(searchAgent)
-				fmt.Printf("Agent: %s (%s)\n", agent.ID, agent.Name)
+			// Execute the search
+			if selectedAgent != nil {
+				fmt.Printf("Searching using agent: %s (%s)\n", selectedAgent.ID(), selectedAgent.Name())
+				results, err := selectedAgent.Search(ctx, query, options)
+				if err != nil {
+					fmt.Printf("Error searching: %v\n", err)
+					return
+				}
+
+				// Display results
+				displaySearchResults(results, selectedAgent)
 			} else {
-				fmt.Println("Searching across all agents:")
-				for _, a := range pkg.GetAgents() {
-					fmt.Printf("  - %s (%s)\n", a.ID, a.Name)
+				fmt.Println("Searching across all agents...")
+
+				// Search through all agents
+				for _, agent := range agents.All() {
+					fmt.Printf("Results from %s (%s):\n", agent.ID(), agent.Name())
+					results, err := agent.Search(ctx, query, options)
+					if err != nil {
+						fmt.Printf("  Error: %v\n", err)
+						continue
+					}
+
+					// Display results from this agent
+					displaySearchResults(results, agent)
+					fmt.Println()
 				}
 			}
-			fmt.Printf("Limit: %d\n", searchLimit)
-			fmt.Printf("Sort: %s\n", searchSort)
 		}
-
-		// Here you would implement the actual search logic to query
-		// across the specified fields (title, author, genre) based on fieldsToSearch
-		// and apply the fieldFilters as exact match constraints
 	},
+}
+
+// Helper function to display search results in a user-friendly format
+func displaySearchResults(results []agents.Manga, agent agents.Agent) {
+	if len(results) == 0 {
+		fmt.Println("  No results found")
+		return
+	}
+
+	fmt.Printf("  Found %d results:\n", len(results))
+	for i, manga := range results {
+		fmt.Printf("  %d. %s (ID: %s:%s)\n", i+1, manga.Title, agent.ID(), manga.ID)
+		if len(manga.Authors) > 0 {
+			fmt.Printf("     Authors: %s\n", strings.Join(manga.Authors, ", "))
+		}
+		if len(manga.Tags) > 0 {
+			fmt.Printf("     Tags: %s\n", strings.Join(manga.Tags[:minInt(5, len(manga.Tags))], ", "))
+			if len(manga.Tags) > 5 {
+				fmt.Printf("     ...and %d more tags\n", len(manga.Tags)-5)
+			}
+		}
+	}
+}
+
+// Helper function for min of two integers
+func minInt(a, b int) int {
+	if a < b {
+		return a
+	}
+	return b
 }
 
 func init() {

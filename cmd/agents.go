@@ -1,7 +1,7 @@
 package cmd
 
 import (
-	"Luminary/pkg"
+	"Luminary/agents"
 	"fmt"
 	"sort"
 	"strings"
@@ -14,22 +14,31 @@ var agentsCmd = &cobra.Command{
 	Short: "List all available manga source agents",
 	Long:  `Display a list of all configured manga source agents that Luminary can use to search and read manga.`,
 	Run: func(cmd *cobra.Command, args []string) {
-		agents := pkg.GetAgents()
+		allAgents := agents.All()
 
 		// Sort agents alphabetically
-		sort.Slice(agents, func(i, j int) bool {
-			return agents[i].Name < agents[j].Name
+		sort.Slice(allAgents, func(i, j int) bool {
+			return allAgents[i].Name() < allAgents[j].Name()
 		})
 
 		if apiMode {
 			// Output machine-readable JSON
 			fmt.Print(`{"agents":[`)
-			for i, agent := range agents {
+			for i, agent := range allAgents {
 				if i > 0 {
 					fmt.Print(",")
 				}
-				fmt.Printf(`{"id":"%s","name":"%s","description":"%s","status":"%s"}`,
-					agent.ID, agent.Name, agent.Description, agent.Status)
+				// Get tags if available
+				tags := "[]"
+				if tagger, ok := agent.(interface{ Tags() []string }); ok {
+					tagSlice := tagger.Tags()
+					if len(tagSlice) > 0 {
+						tags = fmt.Sprintf("%q", tagSlice)
+					}
+				}
+
+				fmt.Printf(`{"id":"%s","name":"%s","description":"%s","status":"%s","tags":%s}`,
+					agent.ID(), agent.Name(), agent.Description(), agent.Status(), tags)
 			}
 			fmt.Println(`]}`)
 		} else {
@@ -41,12 +50,12 @@ var agentsCmd = &cobra.Command{
 			fmt.Printf(format, "ID", "NAME", "STATUS", "DESCRIPTION")
 			fmt.Println(strings.Repeat("-", 80))
 
-			for _, agent := range agents {
+			for _, agent := range allAgents {
 				fmt.Printf(format,
-					agent.ID,
-					agent.Name,
-					agent.Description,
-					agent.Status)
+					agent.ID(),
+					agent.Name(),
+					string(agent.Status()),
+					agent.Description())
 			}
 
 			fmt.Println("")
