@@ -5,26 +5,18 @@ import (
 	"time"
 )
 
-// Status represents an agent's status
-type Status string
-
-const (
-	StatusStable       Status = "stable"
-	StatusExperimental Status = "experimental"
-	StatusOutdated     Status = "outdated"
-)
-
 // Agent defines the interface for manga sources
 type Agent interface {
 	ID() string
 	Name() string
 	Description() string
-	Status() Status
+	Status() string
 
 	Search(ctx context.Context, query string, options SearchOptions) ([]Manga, error)
 	GetManga(ctx context.Context, id string) (*MangaInfo, error)
-	GetChapter(ctx context.Context, mangaID, chapterID string) (*Chapter, error)
-	DownloadChapter(ctx context.Context, mangaID, chapterID, destDir string) error
+	GetChapter(ctx context.Context, chapterID string) (*Chapter, error)
+	tryGetMangaForChapter(ctx context.Context, chapterID string) (*Manga, error)
+	DownloadChapter(ctx context.Context, chapterID, destDir string) error
 }
 
 // SearchOptions for search customization

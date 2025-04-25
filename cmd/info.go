@@ -2,6 +2,7 @@ package cmd
 
 import (
 	"Luminary/agents"
+	"Luminary/utils"
 	"context"
 	"fmt"
 	"strings"
@@ -10,6 +11,27 @@ import (
 	"github.com/spf13/cobra"
 )
 
+// ChapterInfo represents chapter data for API responses
+type ChapterInfo struct {
+	ID     string    `json:"id"`
+	Title  string    `json:"title"`
+	Number float64   `json:"number"`
+	Date   time.Time `json:"date"`
+}
+
+// MangaInfo represents manga data for API responses
+type MangaInfo struct {
+	ID          string        `json:"id"`
+	Title       string        `json:"title"`
+	Agent       string        `json:"agent"`
+	AgentName   string        `json:"agent_name"`
+	Description string        `json:"description"`
+	Authors     []string      `json:"authors,omitempty"`
+	Status      string        `json:"status,omitempty"`
+	Tags        []string      `json:"tags,omitempty"`
+	Chapters    []ChapterInfo `json:"chapters,omitempty"`
+}
+
 var infoCmd = &cobra.Command{
 	Use:   "info [agent:manga-id]",
 	Short: "Get detailed information about a manga",
@@ -17,17 +39,25 @@ var infoCmd = &cobra.Command{
 	Args:  cobra.ExactArgs(1),
 	Run: func(cmd *cobra.Command, args []string) {
 		// Parse the manga ID format "agent:id"
-		parts := strings.SplitN(args[0], ":", 2)
-		if len(parts) != 2 {
+		agentID, mangaID, err := utils.ParseMangaID(args[0])
+		if err != nil {
+			if apiMode {
+				utils.OutputJSON("error", nil, err)
+				return
+			}
+
 			fmt.Println("Error: Invalid manga ID format, must be 'agent:id'")
 			return
 		}
 
-		agentID, mangaID := parts[0], parts[1]
-
 		// Get the agent
 		agent := agents.Get(agentID)
 		if agent == nil {
+			if apiMode {
+				utils.OutputJSON("error", nil, fmt.Errorf("agent '%s' not found", agentID))
+				return
+			}
+
 			fmt.Printf("Error: Agent '%s' not found\n", agentID)
 			fmt.Println("Available agents:")
 			for _, a := range agents.All() {
@@ -42,30 +72,43 @@ var infoCmd = &cobra.Command{
 
 		manga, err := agent.GetManga(ctx, mangaID)
 		if err != nil {
+			if apiMode {
+				utils.OutputJSON("error", nil, err)
+				return
+			}
+
 			fmt.Printf("Error retrieving manga: %v\n", err)
 			return
 		}
 
 		if apiMode {
-			// Output machine-readable JSON
-			fmt.Printf(`{"manga":{"id":"%s","title":"%s","agent":"%s","description":"%s"`,
-				mangaID, manga.Title, agentID, manga.Description)
-
-			// Output authors if available
-			if len(manga.Authors) > 0 {
-				fmt.Printf(`,"authors":["%s"]`, strings.Join(manga.Authors, `","`))
+			// Create structured manga info for API response
+			mangaInfo := MangaInfo{
+				ID:          utils.FormatMangaID(agentID, mangaID),
+				Title:       manga.Title,
+				Agent:       agentID,
+				AgentName:   agent.Name(),
+				Description: manga.Description,
+				Authors:     manga.Authors,
+				Status:      manga.Status,
+				Tags:        manga.Tags,
 			}
 
-			// Output chapters
-			fmt.Print(`,"chapters":[`)
-			for i, chapter := range manga.Chapters {
-				if i > 0 {
-					fmt.Print(",")
+			// Add chapters info
+			for _, chapter := range manga.Chapters {
+				chapterInfo := ChapterInfo{
+					ID:     utils.FormatMangaID(agentID, chapter.ID),
+					Title:  chapter.Title,
+					Number: chapter.Number,
+					Date:   chapter.Date,
 				}
-				fmt.Printf(`{"id":"%s","title":"%s","number":%g,"date":"%s"}`,
-					chapter.ID, chapter.Title, chapter.Number, chapter.Date.Format(time.RFC3339))
+				mangaInfo.Chapters = append(mangaInfo.Chapters, chapterInfo)
 			}
-			fmt.Println(`]}}`)
+
+			// Output the manga info
+			utils.OutputJSON("success", map[string]interface{}{
+				"manga": mangaInfo,
+			}, nil)
 		} else {
 			// Interactive mode for CLI users
 			fmt.Printf("Manga: %s\n", manga.Title)
@@ -88,7 +131,10 @@ var infoCmd = &cobra.Command{
 			// Display chapters
 			fmt.Printf("Chapters (%d):\n", len(manga.Chapters))
 			for _, chapter := range manga.Chapters {
-				fmt.Printf("- %s (Chapter %g, %s)\n",
+				// Include the chapter ID in the output with the format: agent:chapterID
+				fmt.Printf("- %s:%s: %s (Chapter %g, %s)\n",
+					agentID,
+					chapter.ID,
 					chapter.Title,
 					chapter.Number,
 					chapter.Date.Format("2006-01-02"))

@@ -2,6 +2,7 @@ package cmd
 
 import (
 	"Luminary/agents"
+	"Luminary/utils"
 	"context"
 	"fmt"
 	"strings"
@@ -20,6 +21,17 @@ var (
 	includeAllLangs  bool
 )
 
+// MangaSearchResult represents a manga search result for API output
+type MangaSearchResult struct {
+	ID        string   `json:"id"`
+	Title     string   `json:"title"`
+	Agent     string   `json:"agent"`
+	AgentName string   `json:"agent_name,omitempty"`
+	AltTitles []string `json:"alt_titles,omitempty"`
+	Authors   []string `json:"authors,omitempty"`
+	Tags      []string `json:"tags,omitempty"`
+}
+
 // searchCmd represents the search command
 var searchCmd = &cobra.Command{
 	Use:   "search [query]",
@@ -36,6 +48,11 @@ var searchCmd = &cobra.Command{
 		if searchAgent != "" {
 			selectedAgent = agents.Get(searchAgent)
 			if selectedAgent == nil {
+				if apiMode {
+					utils.OutputJSON("error", nil, fmt.Errorf("agent '%s' not found", searchAgent))
+					return
+				}
+
 				fmt.Printf("Error: Agent '%s' not found\n", searchAgent)
 				fmt.Println("Available agents:")
 				for _, a := range agents.All() {
@@ -54,29 +71,40 @@ var searchCmd = &cobra.Command{
 		}
 
 		if apiMode {
+			var allResults []MangaSearchResult
+
 			// When a specific agent is selected
 			if selectedAgent != nil {
 				results, err := selectedAgent.Search(ctx, query, options)
 				if err != nil {
-					fmt.Printf(`{"error": "%s"}`, err)
+					utils.OutputJSON("error", nil, err)
 					return
 				}
 
-				// Output machine-readable JSON
-				fmt.Print(`{"results":[`)
-				for i, manga := range results {
-					if i > 0 {
-						fmt.Print(",")
+				// Convert results to our standardized format
+				for _, manga := range results {
+					result := MangaSearchResult{
+						ID:        utils.FormatMangaID(selectedAgent.ID(), manga.ID),
+						Title:     manga.Title,
+						Agent:     selectedAgent.ID(),
+						AgentName: selectedAgent.Name(),
 					}
-					fmt.Printf(`{"id":"%s","title":"%s","agent":"%s"}`,
-						manga.ID, manga.Title, selectedAgent.ID())
+
+					// Include additional fields if available
+					if includeAltTitles && len(manga.AltTitles) > 0 {
+						result.AltTitles = manga.AltTitles
+					}
+					if len(manga.Authors) > 0 {
+						result.Authors = manga.Authors
+					}
+					if len(manga.Tags) > 0 {
+						result.Tags = manga.Tags
+					}
+
+					allResults = append(allResults, result)
 				}
-				fmt.Println(`]}`)
 			} else {
 				// When searching across all agents, we combine results
-				fmt.Print(`{"results":[`)
-				resultCount := 0
-
 				for _, agent := range agents.All() {
 					results, err := agent.Search(ctx, query, options)
 					if err != nil {
@@ -84,16 +112,35 @@ var searchCmd = &cobra.Command{
 					}
 
 					for _, manga := range results {
-						if resultCount > 0 {
-							fmt.Print(",")
+						result := MangaSearchResult{
+							ID:        utils.FormatMangaID(agent.ID(), manga.ID),
+							Title:     manga.Title,
+							Agent:     agent.ID(),
+							AgentName: agent.Name(),
 						}
-						fmt.Printf(`{"id":"%s","title":"%s","agent":"%s"}`,
-							manga.ID, manga.Title, agent.ID())
-						resultCount++
+
+						// Include additional fields if available
+						if includeAltTitles && len(manga.AltTitles) > 0 {
+							result.AltTitles = manga.AltTitles
+						}
+						if len(manga.Authors) > 0 {
+							result.Authors = manga.Authors
+						}
+						if len(manga.Tags) > 0 {
+							result.Tags = manga.Tags
+						}
+
+						allResults = append(allResults, result)
 					}
 				}
-				fmt.Println(`]}`)
 			}
+
+			// Output the search results
+			utils.OutputJSON("success", map[string]interface{}{
+				"query":   query,
+				"results": allResults,
+				"count":   len(allResults),
+			}, nil)
 		} else {
 			// Interactive mode for CLI users
 			fmt.Printf("Searching for: %s\n", query)

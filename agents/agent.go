@@ -10,7 +10,7 @@ type BaseAgent struct {
 	id          string
 	name        string
 	description string
-	status      Status
+	status      string
 	tags        []string
 
 	SiteURL string
@@ -38,7 +38,7 @@ func (b *BaseAgent) Description() string {
 }
 
 // Status returns the agent's status
-func (b *BaseAgent) Status() Status {
+func (b *BaseAgent) Status() string {
 	return b.status
 }
 
@@ -48,7 +48,7 @@ func (b *BaseAgent) Tags() []string {
 }
 
 // NewBaseAgent creates a new BaseAgent with the provided values
-func NewBaseAgent(id, name, description string, status Status, tags []string) *BaseAgent {
+func NewBaseAgent(id, name, description string, status string, tags []string) *BaseAgent {
 	return &BaseAgent{
 		id:            id,
 		name:          name,
@@ -69,11 +69,3 @@ func (b *BaseAgent) Wait(isAPI bool) {
 		time.Sleep(b.ThrottleImage)
 	}
 }
-
-// CanHandleURI checks if this agent can handle the given URI
-// Optional helper method - not part of the core interface
-func (b *BaseAgent) CanHandleURI(uri string) bool {
-	return false // Base implementation can't handle any URI
-}
-
-// TODO: Implement https://github.com/manga-download/hakuneko/blob/master/src/web/mjs/connectors/KissmangaORG.mjs

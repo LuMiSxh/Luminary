@@ -2,6 +2,7 @@ package cmd
 
 import (
 	"Luminary/agents"
+	"Luminary/utils"
 	"context"
 	"fmt"
 	"time"
@@ -13,6 +14,14 @@ var (
 	listAgent string
 	listLimit int
 )
+
+// MangaListItem represents a manga item for API list responses
+type MangaListItem struct {
+	ID        string `json:"id"`
+	Title     string `json:"title"`
+	Agent     string `json:"agent"`
+	AgentName string `json:"agent_name,omitempty"`
+}
 
 var listCmd = &cobra.Command{
 	Use:   "list",
@@ -27,6 +36,11 @@ var listCmd = &cobra.Command{
 		if listAgent != "" {
 			selectedAgent = agents.Get(listAgent)
 			if selectedAgent == nil {
+				if apiMode {
+					utils.OutputJSON("error", nil, fmt.Errorf("agent '%s' not found", listAgent))
+					return
+				}
+
 				fmt.Printf("Error: Agent '%s' not found\n", listAgent)
 				fmt.Println("Available agents:")
 				for _, a := range agents.All() {
@@ -37,8 +51,7 @@ var listCmd = &cobra.Command{
 		}
 
 		if apiMode {
-			fmt.Print(`{"mangas":[`)
-			resultCount := 0
+			var allMangas []MangaListItem
 
 			// Function to list manga from a single agent
 			listAgentMangas := func(agent agents.Agent) {
@@ -49,12 +62,13 @@ var listCmd = &cobra.Command{
 				}
 
 				for _, manga := range mangas {
-					if resultCount > 0 {
-						fmt.Print(",")
+					mangaItem := MangaListItem{
+						ID:        utils.FormatMangaID(agent.ID(), manga.ID),
+						Title:     manga.Title,
+						Agent:     agent.ID(),
+						AgentName: agent.Name(),
 					}
-					fmt.Printf(`{"id":"%s","title":"%s","agent":"%s"}`,
-						manga.ID, manga.Title, agent.ID())
-					resultCount++
+					allMangas = append(allMangas, mangaItem)
 				}
 			}
 
@@ -67,7 +81,18 @@ var listCmd = &cobra.Command{
 				}
 			}
 
-			fmt.Println(`]}`)
+			// Create response data with agent filter info if applicable
+			responseData := map[string]interface{}{
+				"mangas": allMangas,
+				"count":  len(allMangas),
+			}
+
+			if selectedAgent != nil {
+				responseData["agent"] = selectedAgent.ID()
+				responseData["agent_name"] = selectedAgent.Name()
+			}
+
+			utils.OutputJSON("success", responseData, nil)
 		} else {
 			// Interactive mode for CLI users
 			if selectedAgent != nil {

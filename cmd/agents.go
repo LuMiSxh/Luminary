@@ -2,6 +2,7 @@ package cmd
 
 import (
 	"Luminary/agents"
+	"Luminary/utils"
 	"fmt"
 	"sort"
 	"strings"
@@ -22,25 +23,37 @@ var agentsCmd = &cobra.Command{
 		})
 
 		if apiMode {
-			// Output machine-readable JSON
-			fmt.Print(`{"agents":[`)
-			for i, agent := range allAgents {
-				if i > 0 {
-					fmt.Print(",")
-				}
-				// Get tags if available
-				tags := "[]"
-				if tagger, ok := agent.(interface{ Tags() []string }); ok {
-					tagSlice := tagger.Tags()
-					if len(tagSlice) > 0 {
-						tags = fmt.Sprintf("%q", tagSlice)
-					}
+			// Create a slice to hold agent data
+			type AgentData struct {
+				ID          string   `json:"id"`
+				Name        string   `json:"name"`
+				Description string   `json:"description"`
+				Status      string   `json:"status"`
+				Tags        []string `json:"tags,omitempty"`
+			}
+
+			agentList := make([]AgentData, 0, len(allAgents))
+
+			for _, agent := range allAgents {
+				agentData := AgentData{
+					ID:          agent.ID(),
+					Name:        agent.Name(),
+					Description: agent.Description(),
+					Status:      string(agent.Status()),
 				}
 
-				fmt.Printf(`{"id":"%s","name":"%s","description":"%s","status":"%s","tags":%s}`,
-					agent.ID(), agent.Name(), agent.Description(), agent.Status(), tags)
+				// Get tags if available
+				if tagger, ok := agent.(interface{ Tags() []string }); ok {
+					agentData.Tags = tagger.Tags()
+				}
+
+				agentList = append(agentList, agentData)
 			}
-			fmt.Println(`]}`)
+
+			// Output machine-readable JSON using our utility
+			utils.OutputJSON("success", map[string]interface{}{
+				"agents": agentList,
+			}, nil)
 		} else {
 			// User-friendly output
 			fmt.Println("Available manga source agents:")
