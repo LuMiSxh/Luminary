@@ -2,6 +2,7 @@ package engine
 
 import (
 	"net/http"
+	"net/url"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -19,6 +20,9 @@ type Engine struct {
 	DOM         *DOMService
 	Metadata    *MetadataService
 	Logger      *LoggerService
+	API         *APIService
+	Extractor   *ExtractorService
+	Pagination  *PaginationService
 }
 
 // New creates a new Engine with default configuration
@@ -97,14 +101,24 @@ func New() *Engine {
 		Logger:         loggerService,
 	}
 
+	// Create rate limiter service
+	rateLimiterService := NewRateLimiterService(2 * time.Second)
+
+	// Configure rate limiters for common sites
+	rateLimiterService.SetLimit("api.mangadex.org", 2*time.Second)
+	rateLimiterService.SetLimit("mangadex.org", 1*time.Second)
+
+	// Create DOM service
+	domService := &DOMService{}
+
 	// Create engine with all services
 	engine := &Engine{
 		HTTP:        httpService,
 		Cache:       cacheService,
 		Download:    downloadService,
 		Parser:      parser,
-		RateLimiter: NewRateLimiterService(2 * time.Second),
-		DOM:         &DOMService{},
+		RateLimiter: rateLimiterService,
+		DOM:         domService,
 		Logger:      loggerService,
 	}
 
@@ -113,9 +127,10 @@ func New() *Engine {
 		Parser: parser,
 	}
 
-	// Configure rate limiters for common sites
-	engine.RateLimiter.SetLimit("api.mangadex.org", 2*time.Second)
-	engine.RateLimiter.SetLimit("mangadex.org", 1*time.Second)
+	// Create the new services
+	engine.Extractor = NewExtractorService(loggerService)
+	engine.API = NewAPIService(httpService, rateLimiterService, cacheService, loggerService)
+	engine.Pagination = NewPaginationService(engine.API, engine.Extractor, loggerService)
 
 	return engine
 }
@@ -136,8 +151,18 @@ func (p *ParserService) CompilePattern(pattern string) *regexp.Regexp {
 // Shutdown performs cleanup operations
 func (e *Engine) Shutdown() {
 	// Clean expired cache entries before shutting down
-	_ = e.Cache.CleanExpired()
+	_, _ = e.Cache.CleanExpired()
 
 	// Perform any cleanup needed
 	e.Logger.Info("Engine shutting down")
+}
+
+// ExtractDomain extracts the domain from a URL
+func (e *Engine) ExtractDomain(urlStr string) string {
+	parsed, err := url.Parse(urlStr)
+	if err != nil {
+		// If parsing fails, return the whole URL as the domain
+		return urlStr
+	}
+	return parsed.Host
 }

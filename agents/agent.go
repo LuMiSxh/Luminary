@@ -2,30 +2,31 @@ package agents
 
 import (
 	"Luminary/engine"
-	"Luminary/utils"
 	"context"
-	"errors"
 	"fmt"
-	"golang.org/x/net/html"
-	"net/http"
-	"net/url"
 	"sync"
 	"time"
 )
 
-// BaseAgent provides a complete implementation of the Agent interface
-// with hooks for source-specific customization
+// BaseAgent provides a simplified implementation of the Agent interface
+// that leverages the new engine services
 type BaseAgent struct {
+	// Basic agent information
 	id          string
 	name        string
 	description string
 	siteURL     string
 	apiURL      string
 
-	// Engine provides services
+	// Configuration for different API endpoints
+	APIConfig        engine.APIConfig
+	ExtractorSets    map[string]engine.ExtractorSet
+	PaginationConfig engine.PaginationConfig
+
+	// Engine services
 	Engine *engine.Engine
 
-	// Internal state
+	// State management
 	initialized  bool
 	lastInitTime time.Time
 	initMutex    sync.Mutex
@@ -33,15 +34,16 @@ type BaseAgent struct {
 	cacheMutex   sync.RWMutex
 }
 
-// NewBaseAgent creates a new base agent with the provided values
+// NewBaseAgent creates a new streamlined agent
 func NewBaseAgent(id, name, description string) *BaseAgent {
 	return &BaseAgent{
-		id:          id,
-		name:        name,
-		description: description,
-		Engine:      engine.New(),
-		mangaCache:  make(map[string]*MangaInfo),
-		initialized: false,
+		id:            id,
+		name:          name,
+		description:   description,
+		Engine:        engine.New(),
+		mangaCache:    make(map[string]*MangaInfo),
+		initialized:   false,
+		ExtractorSets: make(map[string]engine.ExtractorSet),
 	}
 }
 
@@ -72,12 +74,13 @@ func (a *BaseAgent) SetSiteURL(url string) {
 
 // APIURL returns the agent's API URL
 func (a *BaseAgent) APIURL() string {
-	return a.apiURL
+	return a.APIConfig.BaseURL
 }
 
 // SetAPIURL sets the agent's API URL
 func (a *BaseAgent) SetAPIURL(url string) {
 	a.apiURL = url
+	a.APIConfig.BaseURL = url
 }
 
 // GetEngine returns the agent's engine instance
@@ -117,32 +120,279 @@ func (a *BaseAgent) OnInitialize(ctx context.Context) error {
 	return nil
 }
 
-// Search provides a default implementation that returns an error
-// Specific agents must override this method
+// Search implements the Agent interface for searching
 func (a *BaseAgent) Search(ctx context.Context, query string, options engine.SearchOptions) ([]Manga, error) {
-	return nil, errors.New("search not implemented by this agent")
+	// Initialize if needed
+	if err := a.Initialize(ctx); err != nil {
+		return nil, err
+	}
+
+	// Log search request
+	a.Engine.Logger.Info("[%s] Searching for: %s", a.id, query)
+
+	// Create a cache key
+	cacheKey := fmt.Sprintf("search:%s:%s:%d", a.id, query, options.Limit)
+
+	// Check cache
+	var cachedResults []Manga
+	if a.Engine.Cache.Get(cacheKey, &cachedResults) {
+		a.Engine.Logger.Debug("[%s] Using cached search results for: %s", a.id, query)
+		return cachedResults, nil
+	}
+
+	// Use pagination service to fetch results
+	params := engine.PaginatedRequestParams{
+		Config:       a.PaginationConfig,
+		APIConfig:    a.APIConfig,
+		EndpointName: "search",
+		BaseParams:   options,
+		PathParams:   []string{},
+		ExtractorSet: a.ExtractorSets["manga"],
+		MaxPages:     1, // Typically search results are on one page
+		ThrottleTime: 500 * time.Millisecond,
+	}
+
+	// If query is provided, modify options to include it
+	if query != "" {
+		searchOpts := options
+		searchOpts.Query = query // Actually set the query field
+		params.BaseParams = searchOpts
+	}
+
+	resultsInterface, err := a.Engine.Pagination.FetchAllPages(ctx, params)
+	if err != nil {
+		a.Engine.Logger.Error("[%s] Search error: %v", a.id, err)
+		return nil, err
+	}
+
+	// Convert to Manga type
+	results := make([]Manga, 0, len(resultsInterface))
+	for _, item := range resultsInterface {
+		if manga, ok := item.(*Manga); ok {
+			results = append(results, *manga)
+		}
+	}
+
+	// Cache results
+	if err := a.Engine.Cache.Set(cacheKey, results); err != nil {
+		a.Engine.Logger.Warn("[%s] Failed to cache search results: %v", a.id, err)
+	}
+
+	a.Engine.Logger.Info("[%s] Found %d results for: %s", a.id, len(results), query)
+	return results, nil
 }
 
-// GetManga provides a default implementation that returns an error
-// Specific agents must override this method
+// GetManga implements the Agent interface for retrieving manga details
 func (a *BaseAgent) GetManga(ctx context.Context, id string) (*MangaInfo, error) {
-	return nil, errors.New("manga retrieval not implemented by this agent")
+	// Initialize if needed
+	if err := a.Initialize(ctx); err != nil {
+		return nil, err
+	}
+
+	// Check memory cache
+	a.cacheMutex.RLock()
+	manga, found := a.mangaCache[id]
+	a.cacheMutex.RUnlock()
+
+	if found {
+		a.Engine.Logger.Debug("[%s] Using cached manga info for: %s", a.id, id)
+		return manga, nil
+	}
+
+	// Try disk cache
+	cacheKey := fmt.Sprintf("manga:%s:%s", a.id, id)
+	var cachedManga MangaInfo
+	if a.Engine.Cache.Get(cacheKey, &cachedManga) {
+		a.Engine.Logger.Debug("[%s] Using disk-cached manga info for: %s", a.id, id)
+
+		// Store in memory cache
+		a.cacheMutex.Lock()
+		a.mangaCache[id] = &cachedManga
+		a.cacheMutex.Unlock()
+
+		return &cachedManga, nil
+	}
+
+	// Log manga retrieval
+	a.Engine.Logger.Info("[%s] Fetching manga details for: %s", a.id, id)
+
+	// Fetch manga details using API service
+	response, err := a.Engine.API.FetchFromAPI(
+		ctx,
+		a.APIConfig,
+		"manga",
+		nil,
+		id,
+	)
+	if err != nil {
+		return nil, fmt.Errorf("failed to fetch manga: %w", err)
+	}
+
+	// Extract manga data
+	result, err := a.Engine.Extractor.Extract(a.ExtractorSets["manga"], response)
+	if err != nil {
+		return nil, fmt.Errorf("failed to extract manga data: %w", err)
+	}
+
+	// Convert to MangaInfo
+	mangaInfo, ok := result.(*MangaInfo)
+	if !ok {
+		return nil, fmt.Errorf("expected MangaInfo, got %T", result)
+	}
+
+	// Fetch chapters for this manga
+	mangaInfo.Chapters, err = a.fetchChaptersForManga(ctx, id)
+	if err != nil {
+		a.Engine.Logger.Warn("[%s] Failed to fetch chapters for manga %s: %v", a.id, id, err)
+		// Continue anyway, just with empty chapters list
+	}
+
+	// Store in caches
+	a.cacheMutex.Lock()
+	a.mangaCache[id] = mangaInfo
+	a.cacheMutex.Unlock()
+
+	if err := a.Engine.Cache.Set(cacheKey, mangaInfo); err != nil {
+		a.Engine.Logger.Warn("[%s] Failed to cache manga info: %v", a.id, err)
+	}
+
+	return mangaInfo, nil
 }
 
-// GetChapter provides a default implementation that returns an error
-// Specific agents must override this method
+// fetchChaptersForManga fetches all chapters for a manga
+func (a *BaseAgent) fetchChaptersForManga(ctx context.Context, mangaID string) ([]ChapterInfo, error) {
+	// Use pagination service to fetch all chapters
+	params := engine.PaginatedRequestParams{
+		Config:       a.PaginationConfig,
+		APIConfig:    a.APIConfig,
+		EndpointName: "chapters",
+		BaseParams:   nil, // Default params
+		PathParams:   []string{mangaID},
+		ExtractorSet: a.ExtractorSets["chapterInfo"],
+		MaxPages:     10, // Reasonable limit to prevent excessive requests
+		ThrottleTime: 500 * time.Millisecond,
+	}
+
+	resultsInterface, err := a.Engine.Pagination.FetchAllPages(ctx, params)
+	if err != nil {
+		return nil, err
+	}
+
+	// Convert to ChapterInfo type
+	chapters := make([]ChapterInfo, 0, len(resultsInterface))
+	for _, item := range resultsInterface {
+		if chapter, ok := item.(*ChapterInfo); ok {
+			chapters = append(chapters, *chapter)
+		}
+	}
+
+	return chapters, nil
+}
+
+// GetChapter implements the Agent interface for retrieving chapter details
 func (a *BaseAgent) GetChapter(ctx context.Context, chapterID string) (*Chapter, error) {
-	return nil, errors.New("chapter retrieval not implemented by this agent")
+	// Initialize if needed
+	if err := a.Initialize(ctx); err != nil {
+		return nil, err
+	}
+
+	// Try cache first
+	cacheKey := fmt.Sprintf("chapter:%s:%s", a.id, chapterID)
+	var cachedChapter Chapter
+	if a.Engine.Cache.Get(cacheKey, &cachedChapter) {
+		a.Engine.Logger.Debug("[%s] Using cached chapter info for: %s", a.id, chapterID)
+		return &cachedChapter, nil
+	}
+
+	// Log chapter retrieval
+	a.Engine.Logger.Info("[%s] Fetching chapter details for: %s", a.id, chapterID)
+
+	// Fetch chapter details using API service
+	response, err := a.Engine.API.FetchFromAPI(
+		ctx,
+		a.APIConfig,
+		"chapter",
+		nil,
+		chapterID,
+	)
+	if err != nil {
+		return nil, fmt.Errorf("failed to fetch chapter: %w", err)
+	}
+
+	// Extract chapter data
+	result, err := a.Engine.Extractor.Extract(a.ExtractorSets["chapter"], response)
+	if err != nil {
+		return nil, fmt.Errorf("failed to extract chapter data: %w", err)
+	}
+
+	// Convert to Chapter
+	chapter, ok := result.(*Chapter)
+	if !ok {
+		return nil, fmt.Errorf("expected Chapter, got %T", result)
+	}
+
+	// Cache the result
+	if err := a.Engine.Cache.Set(cacheKey, chapter); err != nil {
+		a.Engine.Logger.Warn("[%s] Failed to cache chapter info: %v", a.id, err)
+	}
+
+	return chapter, nil
 }
 
 // TryGetMangaForChapter attempts to get manga info for a chapter
-// Specific agents must override this method
 func (a *BaseAgent) TryGetMangaForChapter(ctx context.Context, chapterID string) (*Manga, error) {
-	return nil, errors.New("manga lookup for chapter not implemented by this agent")
+	// Fetch chapter details first to get manga ID
+	chapter, err := a.GetChapter(ctx, chapterID)
+	if err != nil {
+		return nil, err
+	}
+
+	// If manga ID is available in chapter
+	if chapter.MangaID != "" {
+		// Get manga details
+		mangaInfo, err := a.GetManga(ctx, chapter.MangaID)
+		if err != nil {
+			return nil, err
+		}
+		return &mangaInfo.Manga, nil
+	}
+
+	// Try alternative approach - fetch from API
+	response, err := a.Engine.API.FetchFromAPI(
+		ctx,
+		a.APIConfig,
+		"chapterManga",
+		nil,
+		chapterID,
+	)
+	if err != nil {
+		return nil, fmt.Errorf("failed to fetch manga for chapter: %w", err)
+	}
+
+	// Extract manga ID from the response
+	mangaID, err := a.extractMangaIDFromChapterResponse(response)
+	if err != nil {
+		return nil, err
+	}
+
+	// Now fetch the manga details
+	mangaInfo, err := a.GetManga(ctx, mangaID)
+	if err != nil {
+		return nil, err
+	}
+
+	return &mangaInfo.Manga, nil
 }
 
-// DownloadChapter downloads a chapter with common handling
-// This provides a default implementation that agents can use
+// extractMangaIDFromChapterResponse extracts the manga ID from a chapter response
+// This is a stub that should be implemented by specific agents
+func (a *BaseAgent) extractMangaIDFromChapterResponse(response interface{}) (string, error) {
+	// This is a stub - in a real implementation, you would extract the manga ID
+	// from the response using the appropriate path
+	return "", fmt.Errorf("extractMangaIDFromChapterResponse not implemented by this agent")
+}
+
+// DownloadChapter implements the Agent interface for downloading a chapter
 func (a *BaseAgent) DownloadChapter(ctx context.Context, chapterID, destDir string) error {
 	// Initialize if needed
 	if err := a.Initialize(ctx); err != nil {
@@ -247,71 +497,8 @@ func (a *BaseAgent) DownloadChapter(ctx context.Context, chapterID, destDir stri
 	return nil
 }
 
-// FetchJSON is a convenience method for agents to fetch JSON data
-func (a *BaseAgent) FetchJSON(ctx context.Context, url string, result interface{}) error {
-	// Apply rate limiting
-	domain := a.ExtractDomain(url)
-	a.Engine.RateLimiter.Wait(domain)
-
-	// Create custom headers
-	headers := make(http.Header)
-	headers.Set("Accept", "application/json")
-	if a.siteURL != "" {
-		headers.Set("Referer", a.siteURL)
-	}
-
-	// Fetch the JSON
-	return a.Engine.HTTP.FetchJSON(ctx, url, result, headers)
-}
-
-// FetchHTML is a convenience method for agents to fetch HTML content
-func (a *BaseAgent) FetchHTML(ctx context.Context, url string) (string, error) {
-	// Apply rate limiting
-	domain := a.ExtractDomain(url)
-	a.Engine.RateLimiter.Wait(domain)
-
-	// Create custom headers
-	headers := make(http.Header)
-	headers.Set("Accept", "text/html")
-	if a.siteURL != "" {
-		headers.Set("Referer", a.siteURL)
-	}
-
-	// Fetch the HTML
-	return a.Engine.HTTP.FetchString(ctx, url, headers)
-}
-
-// ParseDOM is a convenience method to parse HTML into a DOM
-func (a *BaseAgent) ParseDOM(html string) (*html.Node, error) {
-	return a.Engine.DOM.Parse(html)
-}
-
 // ExtractDomain extracts the domain from a URL
 func (a *BaseAgent) ExtractDomain(urlStr string) string {
-	parsed, err := url.Parse(urlStr)
-	if err != nil {
-		// If parsing fails, return the whole URL as the domain
-		return urlStr
-	}
-	return parsed.Host
-}
-
-// FormatMangaID creates a standardized manga ID
-func (a *BaseAgent) FormatMangaID(mangaID string) string {
-	return utils.FormatMangaID(a.id, mangaID)
-}
-
-// ParseMangaID parses a combined manga ID
-func (a *BaseAgent) ParseMangaID(combinedID string) (string, error) {
-	agentID, mangaID, err := utils.ParseMangaID(combinedID)
-	if err != nil {
-		return "", err
-	}
-
-	// Check if the agent ID matches
-	if agentID != a.id {
-		return "", fmt.Errorf("manga ID agent mismatch: expected %s, got %s", a.id, agentID)
-	}
-
-	return mangaID, nil
+	// Use the engine's utility method
+	return a.Engine.ExtractDomain(urlStr)
 }

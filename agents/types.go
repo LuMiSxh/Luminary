@@ -53,8 +53,9 @@ type ChapterInfo struct {
 
 // Chapter contains detailed chapter information
 type Chapter struct {
-	Info  ChapterInfo
-	Pages []Page
+	Info    ChapterInfo
+	Pages   []Page
+	MangaID string
 }
 
 // Page represents a manga page

@@ -1,5 +1,7 @@
 package agents
 
+// FIXME: Implement this whole agent from the ground up with the new engine and using the helper functions
+// 		base it on: https://github.com/manga-download/hakuneko/blob/master/src/web/mjs/connectors/MangaDex.mjs
 import (
 	"Luminary/engine"
 	"context"
@@ -10,7 +12,7 @@ import (
 	"time"
 )
 
-// MangaDex implements the Agent interface for MangaDex
+// MangaDex implements the Agent interface for MangaDex using the BaseAgent
 type MangaDex struct {
 	*BaseAgent
 	serverNetwork []string
@@ -29,9 +31,18 @@ func NewMangaDex() *MangaDex {
 		},
 	}
 
-	// Configure specific settings
+	// Configure site URLs
 	agent.SetSiteURL("https://mangadex.org")
 	agent.SetAPIURL("https://api.mangadex.org")
+
+	// Configure API endpoints
+	agent.configureAPIEndpoints()
+
+	// Configure extractors
+	agent.configureExtractors()
+
+	// Configure pagination
+	agent.configurePagination()
 
 	return agent
 }
@@ -44,548 +55,432 @@ func (m *MangaDex) OnInitialize(ctx context.Context) error {
 	return nil
 }
 
-// Search implements manga search for MangaDex using helper
-func (m *MangaDex) Search(ctx context.Context, query string, options engine.SearchOptions) ([]Manga, error) {
-	// Use the helper function with our search implementation
-	results, err := engine.PerformSearch[[]Manga](
-		ctx,
-		m,
-		query,
-		options,
-		func(ctx context.Context, query string, options engine.SearchOptions) ([]Manga, error) {
-			// Define the response structure
-			var response struct {
-				Data []struct {
-					ID         string `json:"id"`
-					Attributes struct {
-						Title       map[string]string   `json:"title"`
-						AltTitles   []map[string]string `json:"altTitles"`
-						Description map[string]string   `json:"description"`
-						Tags        []struct {
-							Attributes struct {
-								Name map[string]string `json:"name"`
-							} `json:"attributes"`
-						} `json:"tags"`
-						Status string `json:"status"`
-					} `json:"attributes"`
-					Relationships []struct {
-						ID         string `json:"id"`
-						Type       string `json:"type"`
-						Attributes struct {
-							Name string `json:"name"`
-						} `json:"attributes"`
-					} `json:"relationships"`
-				} `json:"data"`
-			}
-
-			// Build the query parameters
-			params := url.Values{}
-			params.Set("title", query)
-
-			// Set limit
-			if options.Limit > 0 {
-				params.Set("limit", strconv.Itoa(options.Limit))
-			} else {
-				params.Set("limit", "10") // Default
-			}
-
-			// Apply sorting
-			if options.Sort != "" {
-				switch strings.ToLower(options.Sort) {
-				case "relevance":
-					params.Set("order[relevance]", "desc")
-				case "popularity":
-					params.Set("order[followedCount]", "desc")
-				case "name":
-					params.Set("order[title]", "asc")
-				}
-			}
-
-			// Apply filters
-			if options.Filters != nil {
-				for field, value := range options.Filters {
-					switch field {
-					case "author":
-						params.Add("authors[]", value)
-					case "genre":
-						params.Add("includedTags[]", value)
-					}
-				}
-			}
-
-			// Include all content ratings
-			params.Add("contentRating[]", "safe")
-			params.Add("contentRating[]", "suggestive")
-			params.Add("contentRating[]", "erotica")
-			params.Add("contentRating[]", "pornographic")
-
-			// Build the URL
-			apiURL := fmt.Sprintf("%s/manga?%s", m.APIURL(), params.Encode())
-
-			// Fetch and parse the JSON
-			err := m.FetchJSON(ctx, apiURL, &response)
-			if err != nil {
-				return nil, err
-			}
-
-			// Convert to our generic Manga type
-			results := make([]Manga, 0, len(response.Data))
-			for _, item := range response.Data {
-				// Extract title (prefer English)
-				title := m.extractBestTitle(item.Attributes.Title)
-				if title == "" {
-					continue // Skip entries with no title
-				}
-
-				// Extract all alternative titles
-				altTitles := m.extractAltTitles(item.Attributes.Title, item.Attributes.AltTitles, title)
-
-				// Extract description
-				description := m.extractBestDescription(item.Attributes.Description)
-
-				// Extract tags
-				tags := m.extractTags(item.Attributes.Tags)
-
-				// Extract authors
-				authors := m.extractAuthors(item.Relationships)
-
-				// Create manga entry
-				manga := Manga{
-					ID:          item.ID,
-					Title:       title,
-					AltTitles:   altTitles,
-					Description: description,
-					Status:      item.Attributes.Status,
-					Tags:        tags,
-					Authors:     authors,
-				}
-
-				results = append(results, manga)
-			}
-
-			return results, nil
+// configureAPIEndpoints sets up the API configuration
+func (m *MangaDex) configureAPIEndpoints() {
+	m.APIConfig = engine.APIConfig{
+		BaseURL:      m.apiURL,
+		RateLimitKey: "api.mangadex.org",
+		RetryCount:   3,
+		ThrottleTime: 2 * time.Second,
+		DefaultHeaders: map[string]string{
+			"User-Agent": "Luminary/1.0",
+			"Referer":    "https://mangadex.org",
 		},
-	)
+		Endpoints: map[string]engine.APIEndpoint{
+			// Manga details endpoint
+			"manga": {
+				Path:          "/manga/{id}",
+				Method:        "GET",
+				ResponseType:  &MangaDexMangaResponse{},
+				PathFormatter: engine.DefaultPathFormatter,
+			},
 
-	return results, err
-}
+			// Chapter details endpoint
+			"chapter": {
+				Path:          "/chapter/{id}",
+				Method:        "GET",
+				ResponseType:  &MangaDexChapterResponse{},
+				PathFormatter: engine.DefaultPathFormatter,
+			},
 
-// GetManga retrieves detailed information about a manga using helper
-func (m *MangaDex) GetManga(ctx context.Context, id string) (*MangaInfo, error) {
-	// Use the helper function with our manga retrieval implementation
-	mangaInfo, err := engine.PerformGetManga[*MangaInfo](
-		ctx,
-		m,
-		id,
-		m.mangaCache,
-		&m.cacheMutex,
-		m.apiURL,
-		func(ctx context.Context, id string) (*MangaInfo, error) {
-			// Define the response structure for manga details
-			var response struct {
-				Data struct {
-					ID         string `json:"id"`
-					Attributes struct {
-						Title       map[string]string `json:"title"`
-						Description map[string]string `json:"description"`
-						Status      string            `json:"status"`
-						Tags        []struct {
-							Attributes struct {
-								Name map[string]string `json:"name"`
-							} `json:"attributes"`
-						} `json:"tags"`
-					} `json:"attributes"`
-					Relationships []struct {
-						ID         string `json:"id"`
-						Type       string `json:"type"`
-						Attributes struct {
-							Name string `json:"name"`
-						} `json:"attributes"`
-					} `json:"relationships"`
-				} `json:"data"`
-			}
+			// Chapter pages endpoint
+			"chapterPages": {
+				Path:          "/at-home/server/{id}",
+				Method:        "GET",
+				ResponseType:  &MangaDexPagesResponse{},
+				PathFormatter: engine.DefaultPathFormatter,
+			},
 
-			// Build the URL
-			apiURL := fmt.Sprintf("%s/manga/%s", m.APIURL(), id)
-
-			// Fetch and parse the JSON
-			err := m.FetchJSON(ctx, apiURL, &response)
-			if err != nil {
-				return nil, err
-			}
-
-			// Extract title (prefer English)
-			title := m.extractBestTitle(response.Data.Attributes.Title)
-
-			// Extract description
-			description := m.extractBestDescription(response.Data.Attributes.Description)
-
-			// Extract tags
-			tags := m.extractTags(response.Data.Attributes.Tags)
-
-			// Extract authors
-			authors := m.extractAuthors(response.Data.Relationships)
-
-			// Fetch chapter list
-			chapters, err := m.getChapterList(ctx, id)
-			if err != nil {
-				return nil, err
-			}
-
-			// Create MangaInfo with all the data we collected
-			return &MangaInfo{
-				Manga: Manga{
-					ID:          id,
-					Title:       title,
-					Description: description,
-					Status:      response.Data.Attributes.Status,
-					Tags:        tags,
-					Authors:     authors,
+			// Manga chapters endpoint
+			"chapters": {
+				Path:          "/manga/{id}/feed",
+				Method:        "GET",
+				ResponseType:  &MangaDexChapterListResponse{},
+				PathFormatter: engine.DefaultPathFormatter,
+				QueryFormatter: func(params interface{}) url.Values {
+					queryParams := url.Values{}
+					queryParams.Set("limit", "100")
+					queryParams.Set("order[chapter]", "asc")
+					// Add other parameters based on the input if needed
+					return queryParams
 				},
-				Chapters: chapters,
-			}, nil
-		},
-	)
+			},
 
-	return mangaInfo, err
+			// Search endpoint
+			"search": {
+				Path:         "/manga",
+				Method:       "GET",
+				ResponseType: &MangaDexSearchResponse{},
+				QueryFormatter: func(params interface{}) url.Values {
+					queryParams := url.Values{}
+
+					// Handle search options
+					if opts, ok := params.(*engine.SearchOptions); ok {
+						// Apply the title query
+						if opts.Query != "" {
+							queryParams.Set("title", opts.Query)
+						}
+
+						// Set limit
+						if opts.Limit > 0 {
+							queryParams.Set("limit", strconv.Itoa(opts.Limit))
+						} else {
+							queryParams.Set("limit", "10") // Default
+						}
+
+						// Apply sorting
+						if opts.Sort != "" {
+							switch strings.ToLower(opts.Sort) {
+							case "relevance":
+								queryParams.Set("order[relevance]", "desc")
+							case "popularity":
+								queryParams.Set("order[followedCount]", "desc")
+							case "name":
+								queryParams.Set("order[title]", "asc")
+							}
+						}
+
+						// Apply filters
+						if opts.Filters != nil {
+							for field, value := range opts.Filters {
+								switch field {
+								case "author":
+									queryParams.Add("authors[]", value)
+								case "genre":
+									queryParams.Add("includedTags[]", value)
+								}
+							}
+						}
+					}
+
+					// Include all content ratings
+					queryParams.Add("contentRating[]", "safe")
+					queryParams.Add("contentRating[]", "suggestive")
+					queryParams.Add("contentRating[]", "erotica")
+					queryParams.Add("contentRating[]", "pornographic")
+
+					return queryParams
+				},
+			},
+		},
+	}
 }
 
-// GetChapter retrieves detailed information about a chapter using helper
-func (m *MangaDex) GetChapter(ctx context.Context, chapterID string) (*Chapter, error) {
-	// Use the helper function with our chapter retrieval implementation
-	chapter, err := engine.PerformGetChapter[*Chapter](
-		ctx,
-		m,
-		chapterID,
-		m.apiURL,
-		func(ctx context.Context, chapterID string) (*Chapter, error) {
-			// Define response structure
-			var response struct {
-				Data struct {
-					ID         string `json:"id"`
-					Attributes struct {
-						Title     string    `json:"title"`
-						Chapter   string    `json:"chapter"`
-						Volume    string    `json:"volume"`
-						PublishAt time.Time `json:"publishAt"`
-					} `json:"attributes"`
-				} `json:"data"`
-			}
-
-			// Build API URL
-			apiURL := fmt.Sprintf("%s/chapter/%s", m.APIURL(), chapterID)
-
-			// Fetch and parse JSON
-			err := m.FetchJSON(ctx, apiURL, &response)
-			if err != nil {
-				return nil, err
-			}
-
-			// Parse chapter number
-			chapterNum := 0.0
-			if response.Data.Attributes.Chapter != "" {
-				num, err := strconv.ParseFloat(response.Data.Attributes.Chapter, 64)
-				if err == nil {
-					chapterNum = num
-				}
-			}
-
-			// Create a title that includes volume if available
-			title := response.Data.Attributes.Title
-			if response.Data.Attributes.Volume != "" && title == "" {
-				title = fmt.Sprintf("Vol. %s Ch. %s", response.Data.Attributes.Volume, response.Data.Attributes.Chapter)
-			} else if title == "" {
-				title = fmt.Sprintf("Chapter %s", response.Data.Attributes.Chapter)
-			}
-
-			chapterInfo := ChapterInfo{
-				ID:     chapterID,
-				Title:  title,
-				Number: chapterNum,
-				Date:   response.Data.Attributes.PublishAt,
-			}
-
-			// Fetch chapter pages
-			pages, err := m.getChapterPages(ctx, chapterID)
-			if err != nil {
-				return nil, err
-			}
-
-			return &Chapter{
-				Info:  chapterInfo,
-				Pages: pages,
-			}, nil
+// configureExtractors sets up the data extractors
+func (m *MangaDex) configureExtractors() {
+	// Manga extractor set
+	m.ExtractorSets["manga"] = engine.ExtractorSet{
+		Name:  "MangaDexManga",
+		Model: &MangaInfo{},
+		Extractors: []engine.Extractor{
+			{
+				Name:       "ID",
+				SourcePath: []string{"data", "id"},
+				TargetPath: "ID",
+				Required:   true,
+			},
+			{
+				Name:       "Title",
+				SourcePath: []string{"data", "attributes", "title"},
+				TargetPath: "Title",
+				Transform: func(value interface{}) interface{} {
+					if titleMap, ok := value.(map[string]string); ok {
+						return m.extractBestTitle(titleMap)
+					}
+					return ""
+				},
+				Required: true,
+			},
+			{
+				Name:       "Description",
+				SourcePath: []string{"data", "attributes", "description"},
+				TargetPath: "Description",
+				Transform: func(value interface{}) interface{} {
+					if descMap, ok := value.(map[string]string); ok {
+						return m.extractBestDescription(descMap)
+					}
+					return ""
+				},
+			},
+			{
+				Name:       "AltTitles",
+				SourcePath: []string{"data", "attributes", "altTitles"},
+				TargetPath: "AltTitles",
+				Transform: func(value interface{}) interface{} {
+					if altTitles, ok := value.([]map[string]string); ok {
+						titleMap := make(map[string]string)
+						// Get the main title first
+						mainTitle := m.extractBestTitle(titleMap)
+						return m.extractAltTitles(titleMap, altTitles, mainTitle)
+					}
+					return []string{}
+				},
+			},
+			{
+				Name:       "Status",
+				SourcePath: []string{"data", "attributes", "status"},
+				TargetPath: "Status",
+			},
+			{
+				Name:       "Tags",
+				SourcePath: []string{"data", "attributes", "tags"},
+				TargetPath: "Tags",
+				Transform: func(value interface{}) interface{} {
+					if tags, ok := value.([]struct {
+						Attributes struct {
+							Name map[string]string `json:"name"`
+						} `json:"attributes"`
+					}); ok {
+						return m.extractTags(tags)
+					}
+					return []string{}
+				},
+			},
+			{
+				Name:       "Authors",
+				SourcePath: []string{"data", "relationships"},
+				TargetPath: "Authors",
+				Transform: func(value interface{}) interface{} {
+					if relationships, ok := value.([]struct {
+						ID         string `json:"id"`
+						Type       string `json:"type"`
+						Attributes struct {
+							Name string `json:"name"`
+						} `json:"attributes"`
+					}); ok {
+						return m.extractAuthors(relationships)
+					}
+					return []string{}
+				},
+			},
 		},
-	)
+	}
 
-	return chapter, err
+	// Chapter info extractor set
+	m.ExtractorSets["chapterInfo"] = engine.ExtractorSet{
+		Name:  "MangaDexChapterInfo",
+		Model: &ChapterInfo{},
+		Extractors: []engine.Extractor{
+			{
+				Name:       "ID",
+				SourcePath: []string{"id"},
+				TargetPath: "ID",
+				Required:   true,
+			},
+			{
+				Name:       "Title",
+				SourcePath: []string{"attributes", "title"},
+				TargetPath: "Title",
+				Transform: func(value interface{}) interface{} {
+					title, _ := value.(string)
+					if title == "" {
+						// Try to build a title from chapter and volume
+						chapterStr := ""
+						volumeStr := ""
+
+						// Get chapter number
+						if ch, ok := m.getSourceValue([]string{"attributes", "chapter"}).(string); ok && ch != "" {
+							chapterStr = ch
+						}
+
+						// Get volume number
+						if vol, ok := m.getSourceValue([]string{"attributes", "volume"}).(string); ok && vol != "" {
+							volumeStr = vol
+						}
+
+						if volumeStr != "" && chapterStr != "" {
+							return fmt.Sprintf("Vol. %s Ch. %s", volumeStr, chapterStr)
+						} else if chapterStr != "" {
+							return fmt.Sprintf("Chapter %s", chapterStr)
+						}
+					}
+					return title
+				},
+			},
+			{
+				Name:       "Number",
+				SourcePath: []string{"attributes", "chapter"},
+				TargetPath: "Number",
+				Transform: func(value interface{}) interface{} {
+					if chapterStr, ok := value.(string); ok && chapterStr != "" {
+						if num, err := strconv.ParseFloat(chapterStr, 64); err == nil {
+							return num
+						}
+					}
+					return 0.0
+				},
+			},
+			{
+				Name:       "Date",
+				SourcePath: []string{"attributes", "publishAt"},
+				TargetPath: "Date",
+				Transform: func(value interface{}) interface{} {
+					if dateStr, ok := value.(string); ok && dateStr != "" {
+						if date, err := time.Parse(time.RFC3339, dateStr); err == nil {
+							return date
+						}
+					}
+					return time.Now()
+				},
+			},
+		},
+	}
+
+	// Chapter with pages extractor set
+	m.ExtractorSets["chapter"] = engine.ExtractorSet{
+		Name:  "MangaDexChapter",
+		Model: &Chapter{},
+		Extractors: []engine.Extractor{
+			{
+				Name:       "ChapterInfo",
+				SourcePath: []string{"data"},
+				TargetPath: "Info",
+				Transform: func(value interface{}) interface{} {
+					// Use the chapterInfo extractor to extract chapter metadata
+					if data, ok := value.(map[string]interface{}); ok {
+						result, err := m.Engine.Extractor.Extract(m.ExtractorSets["chapterInfo"], data)
+						if err == nil {
+							if chapterInfo, ok := result.(*ChapterInfo); ok {
+								return *chapterInfo
+							}
+						}
+					}
+					return ChapterInfo{}
+				},
+				Required: true,
+			},
+			// Pages will be loaded separately using the chapterPages endpoint
+		},
+	}
 }
 
-// DownloadChapter downloads a chapter with using the base implementation but ensuring
-// that our GetChapter method is called
-func (m *MangaDex) DownloadChapter(ctx context.Context, chapterID, destDir string) error {
-	// Initialize if needed
-	if err := m.Initialize(ctx); err != nil {
-		return err
+// configurePagination sets up the pagination configuration
+func (m *MangaDex) configurePagination() {
+	m.PaginationConfig = engine.PaginationConfig{
+		LimitParam:     "limit",
+		OffsetParam:    "offset",
+		TotalCountPath: []string{"total"},
+		ItemsPath:      []string{"data"},
+		DefaultLimit:   100,
+		MaxLimit:       100,
 	}
+}
 
-	// Log download request
-	m.Engine.Logger.Info("[%s] Downloading chapter: %s to %s", m.id, chapterID, destDir)
-
-	// Get chapter information
-	chapter, err := m.GetChapter(ctx, chapterID)
-	if err != nil {
-		return err
-	}
-
-	// Try to get manga info for proper manga title
-	var mangaTitle string
-	var mangaID string
-
-	manga, err := m.TryGetMangaForChapter(ctx, chapterID)
-	if err == nil && manga != nil {
-		mangaTitle = manga.Title
-		mangaID = manga.ID
-	} else {
-		// Fall back to using chapter title
-		m.Engine.Logger.Debug("[%s] Couldn't find manga for chapter %s, using fallback title", m.id, chapterID)
-		mangaTitle = fmt.Sprintf("%s-%s", m.Name(), chapterID)
-	}
-
-	// Extract chapter and volume numbers
-	chapterNum := &chapter.Info.Number
-	if *chapterNum == 0 {
-		chapterNum = nil
-	}
-
-	// Check for volume override in context
-	var volumeNum *int
-	if val := ctx.Value("volume_override"); val != nil {
-		if volNum, ok := val.(int); ok && volNum > 0 {
-			volumeNum = &volNum
-		}
-	} else if chapter.Info.Title != "" {
-		// Try to extract volume from title if not overridden
-		_, extractedVol := m.Engine.Metadata.ExtractChapterInfo(chapter.Info.Title)
-		volumeNum = extractedVol
-	}
-
-	// Prepare metadata
-	metadata := engine.ChapterMetadata{
-		MangaID:      mangaID,
-		MangaTitle:   mangaTitle,
-		ChapterID:    chapterID,
-		ChapterNum:   chapterNum,
-		VolumeNum:    volumeNum,
-		ChapterTitle: chapter.Info.Title,
-		AgentID:      m.ID(),
-	}
-
-	// Convert pages to download requests
-	downloadFiles := make([]engine.DownloadRequest, len(chapter.Pages))
-	for i, page := range chapter.Pages {
-		downloadFiles[i] = engine.DownloadRequest{
-			URL:       page.URL,
-			Index:     i + 1,
-			Filename:  page.Filename,
-			PageCount: len(chapter.Pages),
-		}
-	}
-
-	// Extract concurrency settings from context or use default
-	concurrency := m.Engine.Download.MaxConcurrency
-	if contextConcurrency, ok := ctx.Value("concurrency").(int); ok && contextConcurrency > 0 {
-		concurrency = contextConcurrency
-	}
-
-	// Set up download configuration
-	config := engine.DownloadJobConfig{
-		Metadata:    metadata,
-		OutputDir:   destDir,
-		Concurrency: concurrency,
-		Files:       downloadFiles,
-		WaitDuration: func(isRetry bool) {
-			if isRetry {
-				time.Sleep(m.Engine.HTTP.ThrottleTimeAPI)
-			} else {
-				time.Sleep(m.Engine.HTTP.ThrottleTimeImages)
-			}
-		},
-	}
-
-	// Log and start download
-	m.Engine.Logger.Info("[%s] Downloading %d pages for chapter %s", m.id, len(chapter.Pages), chapterID)
-
-	// Use the engine's download service to download the chapter
-	err = m.Engine.Download.DownloadChapter(ctx, config)
-	if err != nil {
-		m.Engine.Logger.Error("[%s] Download failed: %v", m.id, err)
-		return err
-	}
-
-	m.Engine.Logger.Info("[%s] Successfully downloaded chapter %s", m.id, chapterID)
+// getSourceValue is a helper to get a value from the source data
+func (m *MangaDex) getSourceValue(path []string) interface{} {
+	// This is a stub - in a real implementation, you'd need access to the source data
 	return nil
 }
 
-// TryGetMangaForChapter attempts to get manga info for a chapter
-func (m *MangaDex) TryGetMangaForChapter(ctx context.Context, chapterID string) (*Manga, error) {
-	// Define response structure
-	var response struct {
-		Data struct {
-			Relationships []struct {
-				ID   string `json:"id"`
-				Type string `json:"type"`
-			} `json:"relationships"`
-		} `json:"data"`
-	}
-
-	// Build API URL
-	apiURL := fmt.Sprintf("%s/chapter/%s", m.APIURL(), chapterID)
-
-	// Fetch and parse JSON
-	err := m.FetchJSON(ctx, apiURL, &response)
-	if err != nil {
+// GetChapter overrides the BaseAgent's method to handle the special case of loading pages
+func (m *MangaDex) GetChapter(ctx context.Context, chapterID string) (*Chapter, error) {
+	// Initialize if needed
+	if err := m.Initialize(ctx); err != nil {
 		return nil, err
 	}
 
-	// Find the manga ID in relationships
-	var mangaID string
-	for _, rel := range response.Data.Relationships {
+	// Try cache first
+	cacheKey := fmt.Sprintf("chapter:%s:%s", m.id, chapterID)
+	var cachedChapter Chapter
+	if m.Engine.Cache.Get(cacheKey, &cachedChapter) {
+		m.Engine.Logger.Debug("[%s] Using cached chapter info for: %s", m.id, chapterID)
+		return &cachedChapter, nil
+	}
+
+	// Log chapter retrieval
+	m.Engine.Logger.Info("[%s] Fetching chapter details for: %s", m.id, chapterID)
+
+	// Fetch chapter details using API service
+	response, err := m.Engine.API.FetchFromAPI(
+		ctx,
+		m.APIConfig,
+		"chapter",
+		nil,
+		chapterID,
+	)
+	if err != nil {
+		return nil, fmt.Errorf("failed to fetch chapter: %w", err)
+	}
+
+	// Create a new chapter object
+	chapter := &Chapter{
+		Info: ChapterInfo{
+			ID: chapterID,
+		},
+	}
+
+	// Process the response directly instead of using the extractor
+	chapterResp, ok := response.(*MangaDexChapterResponse)
+	if !ok {
+		return nil, fmt.Errorf("unexpected response type: %T", response)
+	}
+
+	// Extract chapter information
+	chapter.Info.ID = chapterID
+	chapter.Info.Title = chapterResp.Data.Attributes.Title
+
+	// Convert chapter number if present
+	if chapterResp.Data.Attributes.Chapter != "" {
+		if num, err := strconv.ParseFloat(chapterResp.Data.Attributes.Chapter, 64); err == nil {
+			chapter.Info.Number = num
+		}
+	}
+
+	// Set publication date
+	chapter.Info.Date = chapterResp.Data.Attributes.PublishAt
+
+	// Extract manga ID from relationships
+	for _, rel := range chapterResp.Data.Relationships {
 		if rel.Type == "manga" {
-			mangaID = rel.ID
+			chapter.MangaID = rel.ID
 			break
 		}
 	}
 
-	if mangaID == "" {
-		return nil, fmt.Errorf("manga ID not found for chapter")
-	}
-
-	// Now get the manga details
-	manga, err := m.GetManga(ctx, mangaID)
+	// Now fetch the pages using the chapterPages endpoint
+	pagesResponse, err := m.Engine.API.FetchFromAPI(
+		ctx,
+		m.APIConfig,
+		"chapterPages",
+		nil,
+		chapterID,
+	)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("failed to fetch chapter pages: %w", err)
 	}
 
-	return &manga.Manga, nil
+	// Extract pages from the response
+	pages, err := m.extractPages(pagesResponse, chapterID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to extract chapter pages: %w", err)
+	}
+
+	// Add pages to the chapter
+	chapter.Pages = pages
+
+	// Cache the result
+	if err := m.Engine.Cache.Set(cacheKey, chapter); err != nil {
+		m.Engine.Logger.Warn("[%s] Failed to cache chapter info: %v", m.id, err)
+	}
+
+	return chapter, nil
 }
 
-// Helper methods for MangaDex specific functionality
-
-// getChapterList fetches all chapters for a manga
-func (m *MangaDex) getChapterList(ctx context.Context, mangaID string) ([]ChapterInfo, error) {
-	var allChapters []ChapterInfo
-
-	// Limit to max 10 pages to prevent infinite loop
-	maxPages := 10
-
-	for page := 0; page < maxPages; page++ {
-		chapters, hasMore, err := m.getChapterPage(ctx, mangaID, page)
-		if err != nil {
-			return nil, err
-		}
-
-		// Add chapters to our result list
-		allChapters = append(allChapters, chapters...)
-
-		// If no more pages, break the loop
-		if !hasMore {
-			break
-		}
+// extractPages extracts pages from the pages response
+func (m *MangaDex) extractPages(response interface{}, chapterID string) ([]Page, error) {
+	// Try to cast to the expected response type
+	pagesResp, ok := response.(*MangaDexPagesResponse)
+	if !ok {
+		return nil, fmt.Errorf("unexpected response type: %T", response)
 	}
 
-	return allChapters, nil
-}
-
-// getChapterPage fetches a single page of chapters
-func (m *MangaDex) getChapterPage(ctx context.Context, mangaID string, page int) ([]ChapterInfo, bool, error) {
-	// Define response structure
-	var response struct {
-		Data []struct {
-			ID         string `json:"id"`
-			Attributes struct {
-				Title     string    `json:"title"`
-				Chapter   string    `json:"chapter"`
-				Volume    string    `json:"volume"`
-				PublishAt time.Time `json:"publishAt"`
-			} `json:"attributes"`
-		} `json:"data"`
-		Total  int `json:"total"`
-		Limit  int `json:"limit"`
-		Offset int `json:"offset"`
-	}
-
-	// Build API URL
-	apiURL := fmt.Sprintf("%s/manga/%s/feed?limit=100&offset=%d&order[chapter]=asc",
-		m.APIURL(), mangaID, page*100)
-
-	// Fetch and parse JSON
-	err := m.FetchJSON(ctx, apiURL, &response)
-	if err != nil {
-		return nil, false, err
-	}
-
-	// Convert response to our ChapterInfo type
-	chapters := make([]ChapterInfo, 0, len(response.Data))
-	for _, item := range response.Data {
-		// Parse chapter number
-		chapterNum := 0.0
-		if item.Attributes.Chapter != "" {
-			num, err := strconv.ParseFloat(item.Attributes.Chapter, 64)
-			if err == nil {
-				chapterNum = num
-			}
-		}
-
-		// Create title that includes volume if available
-		title := item.Attributes.Title
-		if item.Attributes.Volume != "" && title == "" {
-			title = fmt.Sprintf("Vol. %s Ch. %s", item.Attributes.Volume, item.Attributes.Chapter)
-		} else if title == "" {
-			title = fmt.Sprintf("Chapter %s", item.Attributes.Chapter)
-		}
-
-		chapters = append(chapters, ChapterInfo{
-			ID:     item.ID,
-			Title:  title,
-			Number: chapterNum,
-			Date:   item.Attributes.PublishAt,
-		})
-	}
-
-	// Check if there are more chapters to fetch
-	hasMore := (response.Offset + response.Limit) < response.Total
-
-	return chapters, hasMore, nil
-}
-
-// getChapterPages fetches page data for a chapter
-func (m *MangaDex) getChapterPages(ctx context.Context, chapterID string) ([]Page, error) {
-	// Define response structure
-	var response struct {
-		BaseURL string `json:"baseUrl"`
-		Chapter struct {
-			Hash string   `json:"hash"`
-			Data []string `json:"data"`
-		} `json:"chapter"`
-	}
-
-	// Build API URL
-	apiURL := fmt.Sprintf("%s/at-home/server/%s", m.APIURL(), chapterID)
-
-	// Fetch and parse JSON
-	err := m.FetchJSON(ctx, apiURL, &response)
-	if err != nil {
-		return nil, err
-	}
-
-	// Convert to Page objects
-	pages := make([]Page, len(response.Chapter.Data))
-	for i, file := range response.Chapter.Data {
+	// Extract pages
+	pages := make([]Page, len(pagesResp.Chapter.Data))
+	for i, file := range pagesResp.Chapter.Data {
 		// Try using the first server in our network
 		formattedUrl := fmt.Sprintf("%s%s/%s",
 			m.serverNetwork[0],
-			response.Chapter.Hash,
+			pagesResp.Chapter.Hash,
 			file)
 
 		pages[i] = Page{
@@ -598,7 +493,23 @@ func (m *MangaDex) getChapterPages(ctx context.Context, chapterID string) ([]Pag
 	return pages, nil
 }
 
-// Extraction helper methods
+// extractMangaIDFromChapterResponse extracts the manga ID from a chapter response
+func (m *MangaDex) extractMangaIDFromChapterResponse(response interface{}) (string, error) {
+	// Try to cast to the expected response type
+	chapterResp, ok := response.(*MangaDexChapterResponse)
+	if !ok {
+		return "", fmt.Errorf("unexpected response type: %T", response)
+	}
+
+	// Find the manga ID in relationships
+	for _, rel := range chapterResp.Data.Relationships {
+		if rel.Type == "manga" {
+			return rel.ID, nil
+		}
+	}
+
+	return "", fmt.Errorf("manga ID not found in chapter relationships")
+}
 
 // extractBestTitle extracts the best title from a title map
 func (m *MangaDex) extractBestTitle(titleMap map[string]string) string {
@@ -718,6 +629,98 @@ func (m *MangaDex) extractAuthors(relationships []struct {
 		}
 	}
 	return authors
+}
+
+// MangaDexMangaResponse represents the API response for manga details
+type MangaDexMangaResponse struct {
+	Data struct {
+		ID         string `json:"id"`
+		Attributes struct {
+			Title       map[string]string   `json:"title"`
+			Description map[string]string   `json:"description"`
+			Status      string              `json:"status"`
+			AltTitles   []map[string]string `json:"altTitles"`
+			Tags        []struct {
+				Attributes struct {
+					Name map[string]string `json:"name"`
+				} `json:"attributes"`
+			} `json:"tags"`
+		} `json:"attributes"`
+		Relationships []struct {
+			ID         string `json:"id"`
+			Type       string `json:"type"`
+			Attributes struct {
+				Name string `json:"name"`
+			} `json:"attributes"`
+		} `json:"relationships"`
+	} `json:"data"`
+}
+
+// MangaDexChapterResponse represents the API response for chapter details
+type MangaDexChapterResponse struct {
+	Data struct {
+		ID         string `json:"id"`
+		Attributes struct {
+			Title     string    `json:"title"`
+			Chapter   string    `json:"chapter"`
+			Volume    string    `json:"volume"`
+			PublishAt time.Time `json:"publishAt"`
+		} `json:"attributes"`
+		Relationships []struct {
+			ID   string `json:"id"`
+			Type string `json:"type"`
+		} `json:"relationships"`
+	} `json:"data"`
+}
+
+// MangaDexPagesResponse represents the API response for chapter pages
+type MangaDexPagesResponse struct {
+	BaseURL string `json:"baseUrl"`
+	Chapter struct {
+		Hash string   `json:"hash"`
+		Data []string `json:"data"`
+	} `json:"chapter"`
+}
+
+// MangaDexChapterListResponse represents the API response for manga chapters
+type MangaDexChapterListResponse struct {
+	Data []struct {
+		ID         string `json:"id"`
+		Attributes struct {
+			Title     string    `json:"title"`
+			Chapter   string    `json:"chapter"`
+			Volume    string    `json:"volume"`
+			PublishAt time.Time `json:"publishAt"`
+		} `json:"attributes"`
+	} `json:"data"`
+	Total  int `json:"total"`
+	Limit  int `json:"limit"`
+	Offset int `json:"offset"`
+}
+
+// MangaDexSearchResponse represents the API response for manga search
+type MangaDexSearchResponse struct {
+	Data []struct {
+		ID         string `json:"id"`
+		Attributes struct {
+			Title       map[string]string   `json:"title"`
+			AltTitles   []map[string]string `json:"altTitles"`
+			Description map[string]string   `json:"description"`
+			Tags        []struct {
+				Attributes struct {
+					Name map[string]string `json:"name"`
+				} `json:"attributes"`
+			} `json:"tags"`
+			Status string `json:"status"`
+		} `json:"attributes"`
+		Relationships []struct {
+			ID         string `json:"id"`
+			Type       string `json:"type"`
+			Attributes struct {
+				Name string `json:"name"`
+			} `json:"attributes"`
+		} `json:"relationships"`
+	} `json:"data"`
 }
 
 func init() {

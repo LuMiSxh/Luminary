@@ -2,6 +2,7 @@ package engine
 
 // SearchOptions for search customization
 type SearchOptions struct {
+	Query   string            // The search query string
 	Limit   int               // Maximum number of results to return
 	Fields  []string          // Fields to search within (e.g., "title", "author", "description")
 	Filters map[string]string // Field-specific filters
