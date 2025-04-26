@@ -10,7 +10,6 @@ type Agent interface {
 	ID() string
 	Name() string
 	Description() string
-	Status() string
 
 	Search(ctx context.Context, query string, options SearchOptions) ([]Manga, error)
 	GetManga(ctx context.Context, id string) (*MangaInfo, error)

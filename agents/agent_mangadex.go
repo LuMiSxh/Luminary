@@ -624,7 +624,7 @@ func (m *MangaDex) DownloadChapter(ctx context.Context, chapterID, destDir strin
 
 	// Try to get manga info for proper manga title
 	var mangaTitle string
-	var mangaID string = ""
+	var mangaID = ""
 	manga, err := m.tryGetMangaForChapter(ctx, chapterID)
 	if err == nil && manga != nil {
 		mangaTitle = manga.Title
@@ -765,8 +765,6 @@ func NewMangaDex() *MangaDex {
 			"mgd",
 			"MangaDex",
 			"World's largest manga community and scanlation site",
-			"Experimental",
-			[]string{"manga", "high-quality", "multi-lingual"},
 		),
 		serverNetwork: []string{
 			"https://uploads.mangadex.org/data/",

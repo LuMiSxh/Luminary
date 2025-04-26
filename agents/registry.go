@@ -1,8 +1,6 @@
 package agents
 
 import (
-	"context"
-	"fmt"
 	"sync"
 )
 
@@ -35,31 +33,4 @@ func All() []Agent {
 		agents = append(agents, a)
 	}
 	return agents
-}
-
-// FindAgentForURI finds the first agent that can handle the given URI
-func FindAgentForURI(uri string) Agent {
-	registryMutex.RLock()
-	defer registryMutex.RUnlock()
-
-	for _, agent := range registry {
-		if canHandle, ok := agent.(interface{ CanHandleURI(string) bool }); ok {
-			if canHandle.CanHandleURI(uri) {
-				return agent
-			}
-		}
-	}
-	return nil
-}
-
-// Initialize initializes all registered agents
-func Initialize(ctx context.Context) error {
-	for id, agent := range registry {
-		if initializer, ok := agent.(interface{ Initialize(context.Context) error }); ok {
-			if err := initializer.Initialize(ctx); err != nil {
-				return fmt.Errorf("failed to initialize agent %s: %w", id, err)
-			}
-		}
-	}
-	return nil
 }

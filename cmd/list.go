@@ -126,7 +126,7 @@ var listCmd = &cobra.Command{
 	},
 }
 
-// Helper function to display manga list in a user-friendly format
+// Helper function to display a manga list in a user-friendly format
 func displayMangaList(mangas []agents.Manga, agent agents.Agent) {
 	if len(mangas) == 0 {
 		fmt.Println("  No manga found")

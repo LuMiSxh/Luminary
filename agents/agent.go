@@ -10,8 +10,6 @@ type BaseAgent struct {
 	id          string
 	name        string
 	description string
-	status      string
-	tags        []string
 
 	SiteURL string
 	ApiURL  string
@@ -22,7 +20,7 @@ type BaseAgent struct {
 	ThrottleImage time.Duration
 }
 
-// ID returns the agent's identifier
+// ID returns the agent's identifier - Used for creating the manga UID
 func (b *BaseAgent) ID() string {
 	return b.id
 }
@@ -37,24 +35,12 @@ func (b *BaseAgent) Description() string {
 	return b.description
 }
 
-// Status returns the agent's status
-func (b *BaseAgent) Status() string {
-	return b.status
-}
-
-// Tags returns the agent's tags/categories
-func (b *BaseAgent) Tags() []string {
-	return b.tags
-}
-
 // NewBaseAgent creates a new BaseAgent with the provided values
-func NewBaseAgent(id, name, description string, status string, tags []string) *BaseAgent {
+func NewBaseAgent(id, name, description string) *BaseAgent {
 	return &BaseAgent{
 		id:            id,
 		name:          name,
 		description:   description,
-		status:        status,
-		tags:          tags,
 		Client:        &http.Client{Timeout: 30 * time.Second},
 		ThrottleAPI:   2 * time.Second,
 		ThrottleImage: 500 * time.Millisecond,

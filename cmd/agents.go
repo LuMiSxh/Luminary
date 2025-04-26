@@ -25,11 +25,9 @@ var agentsCmd = &cobra.Command{
 		if apiMode {
 			// Create a slice to hold agent data
 			type AgentData struct {
-				ID          string   `json:"id"`
-				Name        string   `json:"name"`
-				Description string   `json:"description"`
-				Status      string   `json:"status"`
-				Tags        []string `json:"tags,omitempty"`
+				ID          string `json:"id"`
+				Name        string `json:"name"`
+				Description string `json:"description"`
 			}
 
 			agentList := make([]AgentData, 0, len(allAgents))
@@ -39,12 +37,6 @@ var agentsCmd = &cobra.Command{
 					ID:          agent.ID(),
 					Name:        agent.Name(),
 					Description: agent.Description(),
-					Status:      string(agent.Status()),
-				}
-
-				// Get tags if available
-				if tagger, ok := agent.(interface{ Tags() []string }); ok {
-					agentData.Tags = tagger.Tags()
 				}
 
 				agentList = append(agentList, agentData)
@@ -59,15 +51,14 @@ var agentsCmd = &cobra.Command{
 			fmt.Println("Available manga source agents:")
 			fmt.Println("")
 
-			format := "%-12s %-20s %-10s %s\n"
-			fmt.Printf(format, "ID", "NAME", "STATUS", "DESCRIPTION")
+			format := "%-12s %-20s %s\n"
+			fmt.Printf(format, "ID", "NAME", "DESCRIPTION")
 			fmt.Println(strings.Repeat("-", 80))
 
 			for _, agent := range allAgents {
 				fmt.Printf(format,
 					agent.ID(),
 					agent.Name(),
-					string(agent.Status()),
 					agent.Description())
 			}
 
