@@ -54,7 +54,18 @@ var listCmd = &cobra.Command{
 		// Create search options using the engine type
 		options := engine.SearchOptions{
 			Limit: listLimit,
-			// We use empty search to get list of manga
+			// We use empty search to get a list of manga
+		}
+
+		// Check if unlimited fetching is requested
+		if options.Limit == 0 && !apiMode {
+			fmt.Println("Warning: Fetching all available manga. This may take some time...")
+
+			// For unlimited fetches, we should use a longer timeout
+			// Cancel the existing context and create a new one with a longer timeout
+			cancel()
+			ctx, cancel = context.WithTimeout(context.Background(), 5*time.Minute)
+			defer cancel()
 		}
 
 		if apiMode {
@@ -152,5 +163,5 @@ func init() {
 
 	// Flags
 	listCmd.Flags().StringVar(&listAgent, "agent", "", "Specific agent to list manga from (default: all)")
-	listCmd.Flags().IntVar(&listLimit, "limit", 50, "Limit number of results per agent")
+	listCmd.Flags().IntVar(&listLimit, "limit", 50, "Limit number of results per agent (limit 0 for all)")
 }

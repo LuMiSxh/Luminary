@@ -28,7 +28,7 @@ func ExecuteSearch(
 	engine *Engine,
 	agentID string,
 	query string,
-	options SearchOptions,
+	options *SearchOptions,
 	apiConfig APIConfig,
 	paginationConfig PaginationConfig,
 	extractorSet ExtractorSet,

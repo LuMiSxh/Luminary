@@ -49,7 +49,7 @@ func (s *SearchService) ExecuteSearch(
 	ctx context.Context,
 	agentID string,
 	query string,
-	options SearchOptions,
+	options *SearchOptions,
 	apiConfig APIConfig,
 	paginationConfig PaginationConfig,
 	extractorSet ExtractorSet,
@@ -61,6 +61,13 @@ func (s *SearchService) ExecuteSearch(
 	domain := extractDomainFromUrl(apiConfig.BaseURL)
 	s.RateLimiter.Wait(domain)
 
+	maxPages := 1 // Default to 1 page
+	if options.Limit == 0 {
+		// If the limit is 0, fetch all pages by setting maxPages to 0
+		maxPages = 0
+		s.Logger.Info("[%s] Unlimited fetching enabled. This may take some time...", agentID)
+	}
+
 	// Use pagination service to fetch results
 	params := PaginatedRequestParams{
 		Config:       paginationConfig,
@@ -69,11 +76,11 @@ func (s *SearchService) ExecuteSearch(
 		BaseParams:   options,
 		PathParams:   []string{},
 		ExtractorSet: extractorSet,
-		MaxPages:     1, // Typically search results are on one page
+		MaxPages:     maxPages,
 		ThrottleTime: 500 * time.Millisecond,
 	}
 
-	// If query is provided, modify options to include it
+	// If a query is provided, modify options to include it
 	if query != "" {
 		searchOpts := options
 		searchOpts.Query = query

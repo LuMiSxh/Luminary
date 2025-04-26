@@ -2,17 +2,6 @@ package mangadex
 
 import (
 	"Luminary/engine"
-	"fmt"
-	"net/url"
-	"strconv"
-	"strings"
-	"time"
-)
-
-// FIXME: Try re-implementing this from scratch with claude
-// 	use this as template: https://github.com/manga-download/hakuneko/blob/master/src/web/mjs/connectors/MangaDex.mjs
-import (
-	"Luminary/engine"
 	"context"
 	"fmt"
 	"net/url"
@@ -117,7 +106,7 @@ func (m *MangaDex) configureAPIEndpoints() {
 				PathFormatter: engine.DefaultPathFormatter,
 			},
 
-			// Chapter pages endpoint
+			// Chapter pages endpoint (for getting image URLs)
 			"chapterPages": {
 				Path:          "/at-home/server/{id}",
 				Method:        "GET",
@@ -135,7 +124,26 @@ func (m *MangaDex) configureAPIEndpoints() {
 					queryParams := url.Values{}
 					queryParams.Set("limit", "100")
 					queryParams.Set("order[chapter]", "asc")
-					// Add other parameters based on the input if needed
+
+					// Include all content ratings
+					queryParams.Add("contentRating[]", "safe")
+					queryParams.Add("contentRating[]", "suggestive")
+					queryParams.Add("contentRating[]", "erotica")
+					queryParams.Add("contentRating[]", "pornographic")
+
+					// Add offset if provided in params
+					if params != nil {
+						if p, ok := params.(struct {
+							Offset int
+							Limit  int
+						}); ok {
+							queryParams.Set("offset", strconv.Itoa(p.Offset))
+							if p.Limit > 0 {
+								queryParams.Set("limit", strconv.Itoa(p.Limit))
+							}
+						}
+					}
+
 					return queryParams
 				},
 			},
@@ -159,7 +167,8 @@ func (m *MangaDex) configureAPIEndpoints() {
 						if opts.Limit > 0 {
 							queryParams.Set("limit", strconv.Itoa(opts.Limit))
 						} else {
-							queryParams.Set("limit", "10") // Default
+							// If limit=0, request the maximum page size
+							queryParams.Set("limit", "100") // Maximum allowed
 						}
 
 						// Apply sorting
@@ -209,13 +218,13 @@ func (m *MangaDex) configureExtractors() {
 		Extractors: []engine.Extractor{
 			{
 				Name:       "ID",
-				SourcePath: []string{"data", "id"},
+				SourcePath: []string{"Data", "ID"},
 				TargetPath: "ID",
 				Required:   true,
 			},
 			{
 				Name:       "Title",
-				SourcePath: []string{"data", "attributes", "title"},
+				SourcePath: []string{"Data", "Attributes", "Title"},
 				TargetPath: "Title",
 				Transform: func(value interface{}) interface{} {
 					if titleMap, ok := value.(map[string]string); ok {
@@ -225,11 +234,248 @@ func (m *MangaDex) configureExtractors() {
 				},
 				Required: true,
 			},
-			// Other extractors...
+			{
+				Name:       "Description",
+				SourcePath: []string{"Data", "Attributes", "Description"},
+				TargetPath: "Description",
+				Transform: func(value interface{}) interface{} {
+					if descMap, ok := value.(map[string]string); ok {
+						if enDesc, exists := descMap["en"]; exists && enDesc != "" {
+							return enDesc
+						}
+						for _, desc := range descMap {
+							if desc != "" {
+								return desc
+							}
+						}
+					}
+					return ""
+				},
+				Required: false,
+			},
+			{
+				Name:       "Status",
+				SourcePath: []string{"Data", "Attributes", "Status"},
+				TargetPath: "Status",
+				Required:   false,
+			},
+			{
+				Name:       "Tags",
+				SourcePath: []string{"Data", "Attributes", "Tags"},
+				TargetPath: "Tags",
+				Transform: func(value interface{}) interface{} {
+					if tags, ok := value.([]interface{}); ok {
+						result := make([]string, 0, len(tags))
+						for _, tag := range tags {
+							if tagMap, ok := tag.(map[string]interface{}); ok {
+								if attrs, ok := tagMap["attributes"].(map[string]interface{}); ok {
+									if names, ok := attrs["name"].(map[string]string); ok {
+										if enName, exists := names["en"]; exists && enName != "" {
+											result = append(result, enName)
+										}
+									}
+								}
+							}
+						}
+						return result
+					}
+					return []string{}
+				},
+				Required: false,
+			},
+			{
+				Name:       "AltTitles",
+				SourcePath: []string{"Data", "Attributes", "AltTitles"},
+				TargetPath: "AltTitles",
+				Transform: func(value interface{}) interface{} {
+					if altTitles, ok := value.([]map[string]string); ok {
+						result := make([]string, 0, len(altTitles))
+						for _, titleMap := range altTitles {
+							for _, title := range titleMap {
+								if title != "" {
+									result = append(result, title)
+									break
+								}
+							}
+						}
+						return result
+					}
+					return []string{}
+				},
+				Required: false,
+			},
+			{
+				Name:       "Authors",
+				SourcePath: []string{"Data", "Relationships"},
+				TargetPath: "Authors",
+				Transform: func(value interface{}) interface{} {
+					if relationships, ok := value.([]interface{}); ok {
+						authors := make([]string, 0)
+						for _, rel := range relationships {
+							if relMap, ok := rel.(map[string]interface{}); ok {
+								if relType, ok := relMap["type"].(string); ok && (relType == "author" || relType == "artist") {
+									if attrs, ok := relMap["attributes"].(map[string]interface{}); ok {
+										if name, ok := attrs["name"].(string); ok && name != "" {
+											authors = append(authors, name)
+										}
+									}
+								}
+							}
+						}
+						return authors
+					}
+					return []string{}
+				},
+				Required: false,
+			},
 		},
 	}
 
-	// Other extractor sets...
+	// Search results extractor
+	m.extractorSets["search"] = engine.ExtractorSet{
+		Name:  "MangaDexSearch",
+		Model: &engine.Manga{},
+		Extractors: []engine.Extractor{
+			{
+				Name:       "ID",
+				SourcePath: []string{"ID"},
+				TargetPath: "ID",
+				Required:   true,
+			},
+			{
+				Name:       "Title",
+				SourcePath: []string{"Attributes", "Title"},
+				TargetPath: "Title",
+				Transform: func(value interface{}) interface{} {
+					if titleMap, ok := value.(map[string]string); ok {
+						return m.extractBestTitle(titleMap)
+					}
+					return ""
+				},
+				Required: true,
+			},
+			{
+				Name:       "Description",
+				SourcePath: []string{"Attributes", "Description"},
+				TargetPath: "Description",
+				Transform: func(value interface{}) interface{} {
+					if descMap, ok := value.(map[string]string); ok {
+						if enDesc, exists := descMap["en"]; exists && enDesc != "" {
+							return enDesc
+						}
+						for _, desc := range descMap {
+							if desc != "" {
+								return desc
+							}
+						}
+					}
+					return ""
+				},
+				Required: false,
+			},
+			{
+				Name:       "Status",
+				SourcePath: []string{"Attributes", "Status"},
+				TargetPath: "Status",
+				Required:   false,
+			},
+			{
+				Name:       "Tags",
+				SourcePath: []string{"Attributes", "Tags"},
+				TargetPath: "Tags",
+				Transform: func(value interface{}) interface{} {
+					if tags, ok := value.([]interface{}); ok {
+						result := make([]string, 0, len(tags))
+						for _, tag := range tags {
+							if tagMap, ok := tag.(map[string]interface{}); ok {
+								if attrs, ok := tagMap["attributes"].(map[string]interface{}); ok {
+									if names, ok := attrs["name"].(map[string]string); ok {
+										if enName, exists := names["en"]; exists && enName != "" {
+											result = append(result, enName)
+										}
+									}
+								}
+							}
+						}
+						return result
+					}
+					return []string{}
+				},
+				Required: false,
+			},
+			{
+				Name:       "AltTitles",
+				SourcePath: []string{"Attributes", "AltTitles"},
+				TargetPath: "AltTitles",
+				Transform: func(value interface{}) interface{} {
+					if altTitles, ok := value.([]map[string]string); ok {
+						result := make([]string, 0, len(altTitles))
+						for _, titleMap := range altTitles {
+							for _, title := range titleMap {
+								if title != "" {
+									result = append(result, title)
+									break
+								}
+							}
+						}
+						return result
+					}
+					return []string{}
+				},
+				Required: false,
+			},
+			{
+				Name:       "Authors",
+				SourcePath: []string{"Relationships"},
+				TargetPath: "Authors",
+				Transform: func(value interface{}) interface{} {
+					if relationships, ok := value.([]interface{}); ok {
+						authors := make([]string, 0)
+						for _, rel := range relationships {
+							if relMap, ok := rel.(map[string]interface{}); ok {
+								if relType, ok := relMap["type"].(string); ok && (relType == "author" || relType == "artist") {
+									if attrs, ok := relMap["attributes"].(map[string]interface{}); ok {
+										if name, ok := attrs["name"].(string); ok && name != "" {
+											authors = append(authors, name)
+										}
+									}
+								}
+							}
+						}
+						return authors
+					}
+					return []string{}
+				},
+				Required: false,
+			},
+		},
+	}
+
+	// Chapter extractor
+	m.extractorSets["chapter"] = engine.ExtractorSet{
+		Name:  "MangaDexChapter",
+		Model: &engine.Chapter{},
+		Extractors: []engine.Extractor{
+			{
+				Name:       "ID",
+				SourcePath: []string{"Data", "ID"},
+				TargetPath: "Info.ID",
+				Required:   true,
+			},
+			{
+				Name:       "Title",
+				SourcePath: []string{"Data", "Attributes", "Title"},
+				TargetPath: "Info.Title",
+				Required:   false,
+			},
+			{
+				Name:       "Date",
+				SourcePath: []string{"Data", "Attributes", "PublishAt"},
+				TargetPath: "Info.Date",
+				Required:   false,
+			},
+		},
+	}
 }
 
 // Search implements the engine.Agent interface for searching
@@ -240,17 +486,17 @@ func (m *MangaDex) Search(ctx context.Context, query string, options engine.Sear
 		m.engine,
 		m.id,
 		query,
-		options,
+		&options,
 		m.apiConfig,
 		engine.PaginationConfig{
 			LimitParam:     "limit",
 			OffsetParam:    "offset",
-			TotalCountPath: []string{"total"},
-			ItemsPath:      []string{"data"},
+			TotalCountPath: []string{"Total"},
+			ItemsPath:      []string{"Data"},
 			DefaultLimit:   100,
 			MaxLimit:       100,
 		},
-		m.extractorSets["manga"],
+		m.extractorSets["search"],
 	)
 }
 
@@ -270,6 +516,94 @@ func (m *MangaDex) GetManga(ctx context.Context, id string) (*engine.MangaInfo, 
 	)
 }
 
+// fetchChaptersForManga fetches all chapters for a manga
+// This implements the paginated approach similar to HakuNeko's _getChapters function
+func (m *MangaDex) fetchChaptersForManga(ctx context.Context, mangaID string) ([]engine.ChapterInfo, error) {
+	var allChapters []engine.ChapterInfo
+
+	// We'll implement paginated fetching to get all chapters
+	for page := 0; ; page++ {
+		// Create parameters with pagination
+		params := struct {
+			Offset int
+			Limit  int
+		}{
+			Offset: page * 100,
+			Limit:  100,
+		}
+
+		// Fetch a page of chapters
+		response, err := m.engine.API.FetchFromAPI(
+			ctx,
+			m.apiConfig,
+			"chapters",
+			params,
+			mangaID,
+		)
+
+		if err != nil {
+			return nil, fmt.Errorf("failed to fetch chapters: %w", err)
+		}
+
+		// Cast to expected response type
+		chaptersResp, ok := response.(*ChapterListResponse)
+		if !ok {
+			return nil, fmt.Errorf("unexpected response type: %T", response)
+		}
+
+		// If we didn't get any data, break out of the loop
+		if len(chaptersResp.Data) == 0 {
+			break
+		}
+
+		// Process the chapters
+		for _, item := range chaptersResp.Data {
+			// Convert string chapter number to float
+			var chapterNum float64
+			if item.Attributes.Chapter != "" {
+				if num, err := strconv.ParseFloat(item.Attributes.Chapter, 64); err == nil {
+					chapterNum = num
+				}
+			}
+
+			// Extract title
+			title := item.Attributes.Title
+			if title == "" {
+				// Build a title from volume and chapter info like HakuNeko does
+				if item.Attributes.Volume != "" {
+					title += "Vol." + item.Attributes.Volume
+				}
+				if item.Attributes.Chapter != "" {
+					if title != "" {
+						title += " "
+					}
+					title += "Ch." + item.Attributes.Chapter
+				}
+				if title == "" {
+					title = "Untitled"
+				}
+			}
+
+			// Create the chapter info
+			chapterInfo := engine.ChapterInfo{
+				ID:     item.ID,
+				Title:  title,
+				Number: chapterNum,
+				Date:   item.Attributes.PublishAt,
+			}
+
+			allChapters = append(allChapters, chapterInfo)
+		}
+
+		// If we got fewer chapters than the limit, we've reached the end
+		if len(chaptersResp.Data) < 100 {
+			break
+		}
+	}
+
+	return allChapters, nil
+}
+
 // GetChapter implements the engine.Agent interface for retrieving chapter details
 func (m *MangaDex) GetChapter(ctx context.Context, chapterID string) (*engine.Chapter, error) {
 	// Use the engine helper with customized processing function
@@ -281,42 +615,6 @@ func (m *MangaDex) GetChapter(ctx context.Context, chapterID string) (*engine.Ch
 		m.apiConfig,
 		m.extractorSets["chapter"],
 		m.processChapterResponse,
-	)
-}
-
-// TryGetMangaForChapter attempts to get manga info for a chapter
-func (m *MangaDex) TryGetMangaForChapter(ctx context.Context, chapterID string) (*engine.Manga, error) {
-	// Fetch chapter details first to get manga ID
-	chapter, err := m.GetChapter(ctx, chapterID)
-	if err != nil {
-		return nil, err
-	}
-
-	// If manga ID is available in chapter
-	if chapter.MangaID != "" {
-		// Get manga details
-		mangaInfo, err := m.GetManga(ctx, chapter.MangaID)
-		if err != nil {
-			return nil, err
-		}
-		return &mangaInfo.Manga, nil
-	}
-
-	return nil, fmt.Errorf("couldn't determine manga for chapter %s", chapterID)
-}
-
-// DownloadChapter implements the engine.Agent interface for downloading a chapter
-func (m *MangaDex) DownloadChapter(ctx context.Context, chapterID, destDir string) error {
-	// Use the engine helper for downloading
-	return engine.ExecuteDownloadChapter(
-		ctx,
-		m.engine,
-		m.id,
-		m.name,
-		chapterID,
-		destDir,
-		m.GetChapter,
-		m.TryGetMangaForChapter,
 	)
 }
 
@@ -381,8 +679,9 @@ func (m *MangaDex) processChapterResponse(response interface{}, chapterID string
 }
 
 // extractPages extracts pages from the pages response
+// Similar to HakuNeko's _getPages function
 func (m *MangaDex) extractPages(response interface{}, chapterID string) ([]engine.Page, error) {
-	// Try to cast to the expected response type
+	// Cast to expected response type
 	pagesResp, ok := response.(*PagesResponse)
 	if !ok {
 		return nil, fmt.Errorf("unexpected response type: %T", response)
@@ -391,7 +690,7 @@ func (m *MangaDex) extractPages(response interface{}, chapterID string) ([]engin
 	// Extract pages
 	pages := make([]engine.Page, len(pagesResp.Chapter.Data))
 	for i, file := range pagesResp.Chapter.Data {
-		// Try using the first server in our network
+		// Use the first server in our network, similar to how HakuNeko does
 		formattedUrl := fmt.Sprintf("%s%s/%s",
 			m.serverNetwork[0],
 			pagesResp.Chapter.Hash,
@@ -407,15 +706,45 @@ func (m *MangaDex) extractPages(response interface{}, chapterID string) ([]engin
 	return pages, nil
 }
 
-// fetchChaptersForManga fetches all chapters for a manga
-func (m *MangaDex) fetchChaptersForManga(ctx context.Context, mangaID string) ([]engine.ChapterInfo, error) {
-	// Implementation omitted for brevity
-	return []engine.ChapterInfo{}, nil
+// TryGetMangaForChapter attempts to get manga info for a chapter
+func (m *MangaDex) TryGetMangaForChapter(ctx context.Context, chapterID string) (*engine.Manga, error) {
+	// Fetch chapter details first to get manga ID
+	chapter, err := m.GetChapter(ctx, chapterID)
+	if err != nil {
+		return nil, err
+	}
+
+	// If manga ID is available in chapter
+	if chapter.MangaID != "" {
+		// Get manga details
+		mangaInfo, err := m.GetManga(ctx, chapter.MangaID)
+		if err != nil {
+			return nil, err
+		}
+		return &mangaInfo.Manga, nil
+	}
+
+	return nil, fmt.Errorf("couldn't determine manga for chapter %s", chapterID)
+}
+
+// DownloadChapter implements the engine.Agent interface for downloading a chapter
+func (m *MangaDex) DownloadChapter(ctx context.Context, chapterID, destDir string) error {
+	// Use the engine helper for downloading
+	return engine.ExecuteDownloadChapter(
+		ctx,
+		m.engine,
+		m.id,
+		m.name,
+		chapterID,
+		destDir,
+		m.GetChapter,
+		m.TryGetMangaForChapter,
+	)
 }
 
 // extractBestTitle extracts the best title from a title map
 func (m *MangaDex) extractBestTitle(titleMap map[string]string) string {
-	// Prefer English
+	// Prefer English like HakuNeko does
 	if enTitle, ok := titleMap["en"]; ok && enTitle != "" {
 		return enTitle
 	}

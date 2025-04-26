@@ -8,8 +8,12 @@ import (
 
 // Extractor maps API response data to domain models
 type Extractor struct {
-	Name       string                        // Name of this extractor
-	SourcePath []string                      // Path to extract from in source data
+	Name string // Name of this extractor
+	// SourcePath NEEDS to use the same format as the struct it is reflecting.
+	//	example: "data" should be "Data" in the struct
+	SourcePath []string // Path to extract from in source data
+	// TargetPath NEEDS to use the same format as the struct it is reflecting.
+	//	example: "data" should be "Data" in the struct
 	TargetPath string                        // Path to assign to in target object
 	Transform  func(interface{}) interface{} // Optional transformation function
 	Required   bool                          // Whether this field is required

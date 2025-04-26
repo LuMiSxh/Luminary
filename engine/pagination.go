@@ -14,10 +14,13 @@ type PaginationConfig struct {
 	OffsetParam string // Parameter name for offset
 	PageParam   string // Parameter name for page number (alternative to offset)
 
-	// Response data paths
+	// TotalCountPath NEEDS to use the same format as the struct it is reflecting.
+	//	example: "data" should be "Data" in the struct
 	TotalCountPath []string // JSON path to total count in response
 	HasMorePath    []string // JSON path to "has more" boolean in response
-	ItemsPath      []string // JSON path to items array in response
+	// ItemsPath NEEDS to use the same format as the struct it is reflecting.
+	//	example: "data" should be "Data" in the struct
+	ItemsPath []string // JSON path to items array in response
 
 	// Pagination behavior
 	DefaultLimit int // Default number of items per page
@@ -58,10 +61,12 @@ type PaginatedRequestParams struct {
 func (p *PaginationService) FetchAllPages(ctx context.Context, params PaginatedRequestParams) ([]interface{}, error) {
 	var allResults []interface{}
 
-	// Set default values
+	// Set default values. 0 means "fetch all pages"
 	maxPages := params.MaxPages
-	if maxPages <= 0 {
-		maxPages = 10 // Default to 10 pages to prevent unlimited fetching
+	unlimitedPages := maxPages == 0
+
+	if !unlimitedPages && maxPages < 0 {
+		maxPages = 10 // Default to 10 pages if negative value provided
 	}
 
 	pageSize := params.Config.DefaultLimit
@@ -94,7 +99,7 @@ func (p *PaginationService) FetchAllPages(ctx context.Context, params PaginatedR
 	baseParamsValue := reflect.ValueOf(params.BaseParams)
 	baseParamsType := baseParamsValue.Type()
 
-	for page := 0; page < maxPages && hasMore; page++ {
+	for page := 0; (unlimitedPages || page < maxPages) && hasMore; page++ {
 		// Create a new params instance for this page
 		paramsValue := reflect.New(baseParamsType.Elem()).Elem()
 
