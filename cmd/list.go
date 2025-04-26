@@ -2,6 +2,7 @@ package cmd
 
 import (
 	"Luminary/agents"
+	"Luminary/engine"
 	"Luminary/utils"
 	"context"
 	"fmt"
@@ -50,13 +51,19 @@ var listCmd = &cobra.Command{
 			}
 		}
 
+		// Create search options using the engine type
+		options := engine.SearchOptions{
+			Limit: listLimit,
+			// We use empty search to get list of manga
+		}
+
 		if apiMode {
 			var allMangas []MangaListItem
 
 			// Function to list manga from a single agent
 			listAgentMangas := func(agent agents.Agent) {
 				// Use empty search to get list of manga
-				mangas, err := agent.Search(ctx, "", agents.SearchOptions{Limit: listLimit})
+				mangas, err := agent.Search(ctx, "", options)
 				if err != nil {
 					return
 				}
@@ -99,7 +106,7 @@ var listCmd = &cobra.Command{
 				fmt.Printf("Listing manga from agent: %s (%s)\n\n", selectedAgent.ID(), selectedAgent.Name())
 
 				// Use empty search to get list of manga
-				mangas, err := selectedAgent.Search(ctx, "", agents.SearchOptions{Limit: listLimit})
+				mangas, err := selectedAgent.Search(ctx, "", options)
 				if err != nil {
 					fmt.Printf("Error: %v\n", err)
 					return
@@ -113,7 +120,7 @@ var listCmd = &cobra.Command{
 					fmt.Printf("\nFrom agent: %s (%s)\n", agent.ID(), agent.Name())
 
 					// Use empty search to get list of manga
-					mangas, err := agent.Search(ctx, "", agents.SearchOptions{Limit: listLimit})
+					mangas, err := agent.Search(ctx, "", options)
 					if err != nil {
 						fmt.Printf("  Error: %v\n", err)
 						continue

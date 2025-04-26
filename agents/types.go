@@ -1,6 +1,7 @@
 package agents
 
 import (
+	"Luminary/engine"
 	"context"
 	"time"
 )
@@ -10,20 +11,18 @@ type Agent interface {
 	ID() string
 	Name() string
 	Description() string
+	SiteURL() string
+	APIURL() string
 
-	Search(ctx context.Context, query string, options SearchOptions) ([]Manga, error)
+	Initialize(ctx context.Context) error
+	GetEngine() *engine.Engine
+	ExtractDomain(url string) string
+
+	Search(ctx context.Context, query string, options engine.SearchOptions) ([]Manga, error)
 	GetManga(ctx context.Context, id string) (*MangaInfo, error)
 	GetChapter(ctx context.Context, chapterID string) (*Chapter, error)
-	tryGetMangaForChapter(ctx context.Context, chapterID string) (*Manga, error)
+	TryGetMangaForChapter(ctx context.Context, chapterID string) (*Manga, error)
 	DownloadChapter(ctx context.Context, chapterID, destDir string) error
-}
-
-// SearchOptions for search customization
-type SearchOptions struct {
-	Limit   int
-	Fields  []string
-	Filters map[string]string
-	Sort    string
 }
 
 // Manga represents basic manga information

@@ -2,6 +2,7 @@ package cmd
 
 import (
 	"Luminary/agents"
+	"Luminary/engine"
 	"Luminary/utils"
 	"context"
 	"fmt"
@@ -62,8 +63,8 @@ var searchCmd = &cobra.Command{
 			}
 		}
 
-		// Create search options from flags
-		options := agents.SearchOptions{
+		// Create search options from flags using the engine.SearchOptions type
+		options := engine.SearchOptions{
 			Limit:   searchLimit,
 			Fields:  searchFields,
 			Filters: fieldFilters,
@@ -259,7 +260,7 @@ func init() {
 	// Flags
 	searchCmd.Flags().StringVar(&searchAgent, "agent", "", "Search using specific agent")
 	searchCmd.Flags().IntVar(&searchLimit, "limit", 10, "Limit number of results")
-	searchCmd.Flags().StringVar(&searchSort, "sort", "relevance", "Sort by (relevance, popularity, name)")
+	searchCmd.Flags().StringVar(&searchSort, "sort", "relevance", "Sort by (relevance, name, newest, updated)")
 	searchCmd.Flags().StringSliceVar(&searchFields, "fields", []string{}, "Fields to search in (title, author, genre), empty means all")
 	searchCmd.Flags().BoolVar(&includeAltTitles, "alt-titles", true, "Include alternative titles in search")
 	searchCmd.Flags().BoolVar(&includeAllLangs, "all-langs", true, "Search across all language versions of titles")

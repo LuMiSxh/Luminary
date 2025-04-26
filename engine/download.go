@@ -1,4 +1,4 @@
-package utils
+package engine
 
 import (
 	"context"
@@ -7,8 +7,19 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
+	"time"
 )
+
+// DownloadService provides file download capabilities with concurrency control
+type DownloadService struct {
+	MaxConcurrency int
+	Throttle       time.Duration
+	OutputFormat   string
+	Client         *http.Client
+	Logger         *LoggerService
+}
 
 // ChapterMetadata contains essential metadata for file naming
 type ChapterMetadata struct {
@@ -35,7 +46,6 @@ type DownloadJobConfig struct {
 	OutputDir    string            // Base directory to save files
 	Concurrency  int               // Number of concurrent downloads
 	Files        []DownloadRequest // Files to download
-	Client       *http.Client      // HTTP client to use
 	WaitDuration func(bool)        // Optional throttling function (bool = isRetry)
 }
 
@@ -49,8 +59,11 @@ func GetVolumeOverride(ctx context.Context) (*int, bool) {
 	return nil, false
 }
 
-// DownloadChapterConcurrently downloads multiple files concurrently with proper naming
-func DownloadChapterConcurrently(ctx context.Context, config DownloadJobConfig) error {
+// DownloadChapter downloads a chapter with the given config
+func (d *DownloadService) DownloadChapter(ctx context.Context, config DownloadJobConfig) error {
+	// Use service client if not provided in config
+	client := d.Client
+
 	// Check for volume override in context
 	if volumeOverride, hasOverride := GetVolumeOverride(ctx); hasOverride {
 		// Override volume in metadata
@@ -76,7 +89,7 @@ func DownloadChapterConcurrently(ctx context.Context, config DownloadJobConfig) 
 	}
 
 	// Step 2: Create the chapter directory inside the manga directory
-	chapterDirName := FormatChapterDirName(config.Metadata.VolumeNum, config.Metadata.ChapterNum)
+	chapterDirName := formatChapterDirName(config.Metadata.VolumeNum, config.Metadata.ChapterNum)
 	chapterDir := filepath.Join(mangaDir, chapterDirName)
 
 	// Create the chapter directory
@@ -113,7 +126,7 @@ func DownloadChapterConcurrently(ctx context.Context, config DownloadJobConfig) 
 			}
 
 			// Make request
-			resp, err := config.Client.Do(req)
+			resp, err := client.Do(req)
 			if err != nil {
 				errorChan <- fmt.Errorf("failed to download page %d: %w", file.Index, err)
 				return
@@ -145,7 +158,7 @@ func DownloadChapterConcurrently(ctx context.Context, config DownloadJobConfig) 
 			}
 
 			// Generate page filename with sequential numbering
-			pageFilename := FormatPageFilename(file.Index, file.PageCount, ext)
+			pageFilename := formatPageFilename(file.Index, file.PageCount, ext)
 
 			// Full path to save the file
 			fullPath := filepath.Join(chapterDir, pageFilename)
@@ -169,8 +182,107 @@ func DownloadChapterConcurrently(ctx context.Context, config DownloadJobConfig) 
 	}
 
 	if len(errs) > 0 {
+		if d.Logger != nil {
+			d.Logger.Error("Download errors (%d): %v", len(errs), errs[0])
+		}
 		return fmt.Errorf("download errors (%d): %v", len(errs), errs[0])
 	}
 
 	return nil
+}
+
+// Track sequential volume IDs for chapters without volume info
+var (
+	sequentialVolume     = 1
+	sequentialVolumeLock sync.Mutex
+)
+
+// getNextSequentialVolume returns the next sequential volume ID and increments the counter
+func getNextSequentialVolume() int {
+	sequentialVolumeLock.Lock()
+	defer sequentialVolumeLock.Unlock()
+
+	vol := sequentialVolume
+	sequentialVolume++
+	return vol
+}
+
+// formatChapterDirName generates a consistently named directory name for a chapter (without full path)
+func formatChapterDirName(volume *int, chapter *float64) string {
+	if volume != nil && chapter != nil {
+		// Both volume and chapter are available
+		return fmt.Sprintf("%04d-%s", *volume, formatChapterNumber(*chapter))
+	} else if chapter != nil {
+		// Only chapter is available - use sequential volume ID
+		seqVol := getNextSequentialVolume()
+		return fmt.Sprintf("%04d-%s", seqVol, formatChapterNumber(*chapter))
+	} else {
+		// Neither is available, use a default directory
+		seqVol := getNextSequentialVolume()
+		return fmt.Sprintf("%04d-unknown", seqVol)
+	}
+}
+
+// formatPageFilename generates a consistently named filename for a page
+// Always uses sequential numbering regardless of volume/chapter info
+func formatPageFilename(pageIndex int, totalPages int, extension string) string {
+	// Determine maximum page digits for padding
+	pageDigits := len(fmt.Sprintf("%d", totalPages))
+	if pageDigits < 2 {
+		pageDigits = 2 // Minimum 2-digit padding for pages
+	}
+
+	// Format page number with leading zeros
+	paddedPage := fmt.Sprintf("%0*d", pageDigits, pageIndex)
+
+	// Prepare file extension
+	ext := extension
+	if ext == "" || ext[0] != '.' {
+		ext = "." + ext
+	}
+
+	// Always use simple sequential format for page files
+	return fmt.Sprintf("%s%s", paddedPage, ext)
+}
+
+// formatChapterNumber formats a chapter number with proper padding
+// Handles both integer (5 -> "005") and decimal chapters (5.5 -> "005.5")
+func formatChapterNumber(chapter float64) string {
+	// Check if chapter is a whole number
+	if chapter == float64(int(chapter)) {
+		// Integer chapter (e.g., 5 -> "005")
+		return fmt.Sprintf("%03d", int(chapter))
+	} else {
+		// Decimal chapter (e.g., 5.5 -> "005.5")
+		intPart := int(chapter)
+		fracPart := chapter - float64(intPart)
+
+		// Format with 3 digits for integer part and preserve decimal part
+		return fmt.Sprintf("%03d%s", intPart, fmt.Sprintf("%.1f", fracPart)[1:])
+	}
+}
+
+// sanitizeFilename removes invalid characters from a filename
+func sanitizeFilename(name string) string {
+	// Replace invalid filename characters with underscores
+	invalid := []rune{'<', '>', ':', '"', '/', '\\', '|', '?', '*'}
+	for _, char := range invalid {
+		name = strings.ReplaceAll(name, string(char), "_")
+	}
+
+	// Trim spaces and dots at the beginning and end
+	name = strings.Trim(name, " .")
+
+	// If the name is empty after sanitization, use a default
+	if name == "" {
+		name = "Unknown-Manga"
+	}
+
+	// Limit the length to avoid file system issues
+	maxLength := 100
+	if len(name) > maxLength {
+		name = name[:maxLength]
+	}
+
+	return name
 }
