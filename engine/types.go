@@ -1,7 +1,6 @@
-package agents
+package engine
 
 import (
-	"Luminary/engine"
 	"context"
 	"time"
 )
@@ -12,13 +11,10 @@ type Agent interface {
 	Name() string
 	Description() string
 	SiteURL() string
-	APIURL() string
 
 	Initialize(ctx context.Context) error
-	GetEngine() *engine.Engine
-	ExtractDomain(url string) string
 
-	Search(ctx context.Context, query string, options engine.SearchOptions) ([]Manga, error)
+	Search(ctx context.Context, query string, options SearchOptions) ([]Manga, error)
 	GetManga(ctx context.Context, id string) (*MangaInfo, error)
 	GetChapter(ctx context.Context, chapterID string) (*Chapter, error)
 	TryGetMangaForChapter(ctx context.Context, chapterID string) (*Manga, error)

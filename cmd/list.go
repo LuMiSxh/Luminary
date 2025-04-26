@@ -1,7 +1,6 @@
 package cmd
 
 import (
-	"Luminary/agents"
 	"Luminary/engine"
 	"Luminary/utils"
 	"context"
@@ -33,10 +32,11 @@ var listCmd = &cobra.Command{
 		defer cancel()
 
 		// Validate the agent if specified
-		var selectedAgent agents.Agent
+		var selectedAgent engine.Agent
 		if listAgent != "" {
-			selectedAgent = agents.Get(listAgent)
-			if selectedAgent == nil {
+			var exists bool
+			selectedAgent, exists = appEngine.GetAgent(listAgent)
+			if !exists {
 				if apiMode {
 					utils.OutputJSON("error", nil, fmt.Errorf("agent '%s' not found", listAgent))
 					return
@@ -44,7 +44,7 @@ var listCmd = &cobra.Command{
 
 				fmt.Printf("Error: Agent '%s' not found\n", listAgent)
 				fmt.Println("Available agents:")
-				for _, a := range agents.All() {
+				for _, a := range appEngine.AllAgents() {
 					fmt.Printf("  - %s (%s)\n", a.ID(), a.Name())
 				}
 				return
@@ -61,7 +61,7 @@ var listCmd = &cobra.Command{
 			var allMangas []MangaListItem
 
 			// Function to list manga from a single agent
-			listAgentMangas := func(agent agents.Agent) {
+			listAgentMangas := func(agent engine.Agent) {
 				// Use empty search to get list of manga
 				mangas, err := agent.Search(ctx, "", options)
 				if err != nil {
@@ -83,7 +83,7 @@ var listCmd = &cobra.Command{
 				listAgentMangas(selectedAgent)
 			} else {
 				// List manga from all agents
-				for _, agent := range agents.All() {
+				for _, agent := range appEngine.AllAgents() {
 					listAgentMangas(agent)
 				}
 			}
@@ -116,7 +116,7 @@ var listCmd = &cobra.Command{
 			} else {
 				fmt.Println("Listing manga from all agents:")
 
-				for _, agent := range agents.All() {
+				for _, agent := range appEngine.AllAgents() {
 					fmt.Printf("\nFrom agent: %s (%s)\n", agent.ID(), agent.Name())
 
 					// Use empty search to get list of manga
@@ -134,7 +134,7 @@ var listCmd = &cobra.Command{
 }
 
 // Helper function to display a manga list in a user-friendly format
-func displayMangaList(mangas []agents.Manga, agent agents.Agent) {
+func displayMangaList(mangas []engine.Manga, agent engine.Agent) {
 	if len(mangas) == 0 {
 		fmt.Println("  No manga found")
 		return

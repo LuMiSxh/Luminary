@@ -1,7 +1,6 @@
 package cmd
 
 import (
-	"Luminary/agents"
 	"Luminary/engine"
 	"Luminary/utils"
 	"context"
@@ -44,26 +43,7 @@ var searchCmd = &cobra.Command{
 		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 		defer cancel()
 
-		// Validate the agent if specified
-		var selectedAgent agents.Agent
-		if searchAgent != "" {
-			selectedAgent = agents.Get(searchAgent)
-			if selectedAgent == nil {
-				if apiMode {
-					utils.OutputJSON("error", nil, fmt.Errorf("agent '%s' not found", searchAgent))
-					return
-				}
-
-				fmt.Printf("Error: Agent '%s' not found\n", searchAgent)
-				fmt.Println("Available agents:")
-				for _, a := range agents.All() {
-					fmt.Printf("  - %s (%s)\n", a.ID(), a.Name())
-				}
-				return
-			}
-		}
-
-		// Create search options from flags using the engine.SearchOptions type
+		// Create search options from flags
 		options := engine.SearchOptions{
 			Limit:   searchLimit,
 			Fields:  searchFields,
@@ -71,138 +51,153 @@ var searchCmd = &cobra.Command{
 			Sort:    searchSort,
 		}
 
+		// Determine which agents to search
+		var agentIDs []string
+		if searchAgent != "" {
+			// Validate the agent if specified
+			if !appEngine.AgentExists(searchAgent) {
+				if apiMode {
+					utils.OutputJSON("error", nil, fmt.Errorf("agent '%s' not found", searchAgent))
+					return
+				}
+
+				fmt.Printf("Error: Agent '%s' not found\n", searchAgent)
+				fmt.Println("Available agents:")
+				for _, a := range appEngine.AllAgents() {
+					fmt.Printf("  - %s (%s)\n", a.ID(), a.Name())
+				}
+				return
+			}
+
+			agentIDs = []string{searchAgent}
+		}
+
+		// Execute the search using the search service
+		results, err := appEngine.Search.SearchAcrossProviders(
+			ctx,
+			appEngine,
+			query,
+			options,
+			agentIDs,
+		)
+
+		if err != nil {
+			if apiMode {
+				utils.OutputJSON("error", nil, err)
+			} else {
+				fmt.Printf("Error searching: %v\n", err)
+			}
+			return
+		}
+
 		if apiMode {
-			var allResults []MangaSearchResult
-
-			// When a specific agent is selected
-			if selectedAgent != nil {
-				results, err := selectedAgent.Search(ctx, query, options)
-				if err != nil {
-					utils.OutputJSON("error", nil, err)
-					return
-				}
-
-				// Convert results to our standardized format
-				for _, manga := range results {
-					result := MangaSearchResult{
-						ID:        utils.FormatMangaID(selectedAgent.ID(), manga.ID),
-						Title:     manga.Title,
-						Agent:     selectedAgent.ID(),
-						AgentName: selectedAgent.Name(),
-					}
-
-					// Include additional fields if available
-					if includeAltTitles && len(manga.AltTitles) > 0 {
-						result.AltTitles = manga.AltTitles
-					}
-					if len(manga.Authors) > 0 {
-						result.Authors = manga.Authors
-					}
-					if len(manga.Tags) > 0 {
-						result.Tags = manga.Tags
-					}
-
-					allResults = append(allResults, result)
-				}
-			} else {
-				// When searching across all agents, we combine results
-				for _, agent := range agents.All() {
-					results, err := agent.Search(ctx, query, options)
-					if err != nil {
-						continue // Skip agents with errors
-					}
-
-					for _, manga := range results {
-						result := MangaSearchResult{
-							ID:        utils.FormatMangaID(agent.ID(), manga.ID),
-							Title:     manga.Title,
-							Agent:     agent.ID(),
-							AgentName: agent.Name(),
-						}
-
-						// Include additional fields if available
-						if includeAltTitles && len(manga.AltTitles) > 0 {
-							result.AltTitles = manga.AltTitles
-						}
-						if len(manga.Authors) > 0 {
-							result.Authors = manga.Authors
-						}
-						if len(manga.Tags) > 0 {
-							result.Tags = manga.Tags
-						}
-
-						allResults = append(allResults, result)
-					}
-				}
-			}
-
-			// Output the search results
-			utils.OutputJSON("success", map[string]interface{}{
-				"query":   query,
-				"results": allResults,
-				"count":   len(allResults),
-			}, nil)
+			outputAPIResults(results, query)
 		} else {
-			// Interactive mode for CLI users
-			fmt.Printf("Searching for: %s\n", query)
-
-			if len(searchFields) > 0 {
-				fmt.Printf("Search fields: %s\n", strings.Join(searchFields, ", "))
-			} else {
-				fmt.Println("Search fields: all")
-			}
-
-			// Display search options
-			if includeAltTitles {
-				fmt.Println("Searching in alternative titles: enabled")
-			}
-			if includeAllLangs {
-				fmt.Println("Searching across all languages: enabled")
-			}
-			fmt.Printf("Result limit: %d\n", searchLimit)
-
-			// Display field-specific filters
-			if len(fieldFilters) > 0 {
-				fmt.Println("Filters:")
-				for field, value := range fieldFilters {
-					fmt.Printf("  %s: %s\n", field, value)
-				}
-			}
-
-			// Execute the search
-			if selectedAgent != nil {
-				fmt.Printf("Searching using agent: %s (%s)\n", selectedAgent.ID(), selectedAgent.Name())
-				results, err := selectedAgent.Search(ctx, query, options)
-				if err != nil {
-					fmt.Printf("Error searching: %v\n", err)
-					return
-				}
-
-				// Display results
-				displaySearchResults(results, selectedAgent)
-			} else {
-				fmt.Println("Searching across all agents...")
-
-				// Search through all agents
-				for _, agent := range agents.All() {
-					fmt.Printf("Results from %s (%s):\n", agent.ID(), agent.Name())
-					results, err := agent.Search(ctx, query, options)
-					if err != nil {
-						fmt.Printf("  Error: %v\n", err)
-						continue
-					}
-
-					// Display results from this agent
-					displaySearchResults(results, agent)
-					fmt.Println()
-				}
-			}
+			displayConsoleResults(results, query, options)
 		}
 	},
 }
 
+// outputAPIResults formats and outputs search results as JSON for API mode
+func outputAPIResults(results map[string][]engine.Manga, query string) {
+	var allResults []MangaSearchResult
+
+	// Convert all results to our standardized format
+	for agentID, mangaList := range results {
+		agent, _ := appEngine.GetAgent(agentID)
+
+		for _, manga := range mangaList {
+			result := MangaSearchResult{
+				ID:        utils.FormatMangaID(agentID, manga.ID),
+				Title:     manga.Title,
+				Agent:     agentID,
+				AgentName: agent.Name(),
+			}
+
+			// Include additional fields if available
+			if includeAltTitles && len(manga.AltTitles) > 0 {
+				result.AltTitles = manga.AltTitles
+			}
+			if len(manga.Authors) > 0 {
+				result.Authors = manga.Authors
+			}
+			if len(manga.Tags) > 0 {
+				result.Tags = manga.Tags
+			}
+
+			allResults = append(allResults, result)
+		}
+	}
+
+	// Output the search results
+	utils.OutputJSON("success", map[string]interface{}{
+		"query":   query,
+		"results": allResults,
+		"count":   len(allResults),
+	}, nil)
+}
+
+// displayConsoleResults shows search results in an interactive, user-friendly format
+func displayConsoleResults(results map[string][]engine.Manga, query string, options engine.SearchOptions) {
+	// Calculate total result count
+	totalCount := 0
+	for _, mangaList := range results {
+		totalCount += len(mangaList)
+	}
+
+	// Print search information
+	fmt.Printf("Searching for: %s\n", query)
+
+	if len(options.Fields) > 0 {
+		fmt.Printf("Search fields: %s\n", strings.Join(options.Fields, ", "))
+	} else {
+		fmt.Println("Search fields: all")
+	}
+
+	// Display search options
+	if includeAltTitles {
+		fmt.Println("Searching in alternative titles: enabled")
+	}
+	if includeAllLangs {
+		fmt.Println("Searching across all languages: enabled")
+	}
+	fmt.Printf("Result limit: %d\n", options.Limit)
+
+	// Display field-specific filters
+	if len(options.Filters) > 0 {
+		fmt.Println("Filters:")
+		for field, value := range options.Filters {
+			fmt.Printf("  %s: %s\n", field, value)
+		}
+	}
+
+	fmt.Printf("\nTotal results found: %d\n\n", totalCount)
+
+	// Display results for each agent
+	if len(results) == 1 && searchAgent != "" {
+		// Display results for a single agent
+		for agentID, mangaList := range results {
+			agent, _ := appEngine.GetAgent(agentID)
+			fmt.Printf("Results from %s (%s):\n", agent.ID(), agent.Name())
+			displaySearchResults(mangaList, agent)
+		}
+	} else {
+		// Display results from all agents
+		fmt.Println("Results across all agents:")
+		for agentID, mangaList := range results {
+			if len(mangaList) == 0 {
+				continue
+			}
+
+			agent, _ := appEngine.GetAgent(agentID)
+			fmt.Printf("\nFrom %s (%s):\n", agent.ID(), agent.Name())
+			displaySearchResults(mangaList, agent)
+		}
+	}
+}
+
 // Helper function to display search results in a user-friendly format
-func displaySearchResults(results []agents.Manga, agent agents.Agent) {
+func displaySearchResults(results []engine.Manga, agent engine.Agent) {
 	if len(results) == 0 {
 		fmt.Println("  No results found")
 		return

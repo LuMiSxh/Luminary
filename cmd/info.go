@@ -1,7 +1,6 @@
 package cmd
 
 import (
-	"Luminary/agents"
 	"Luminary/utils"
 	"context"
 	"fmt"
@@ -51,8 +50,8 @@ var infoCmd = &cobra.Command{
 		}
 
 		// Get the agent
-		agent := agents.Get(agentID)
-		if agent == nil {
+		agent, exists := appEngine.GetAgent(agentID)
+		if !exists {
 			if apiMode {
 				utils.OutputJSON("error", nil, fmt.Errorf("agent '%s' not found", agentID))
 				return
@@ -60,7 +59,7 @@ var infoCmd = &cobra.Command{
 
 			fmt.Printf("Error: Agent '%s' not found\n", agentID)
 			fmt.Println("Available agents:")
-			for _, a := range agents.All() {
+			for _, a := range appEngine.AllAgents() {
 				fmt.Printf("  - %s (%s)\n", a.ID(), a.Name())
 			}
 			return

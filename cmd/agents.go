@@ -1,7 +1,6 @@
 package cmd
 
 import (
-	"Luminary/agents"
 	"Luminary/utils"
 	"fmt"
 	"sort"
@@ -15,7 +14,7 @@ var agentsCmd = &cobra.Command{
 	Short: "List all available manga source agents",
 	Long:  `Display a list of all configured manga source agents that Luminary can use to search and read manga.`,
 	Run: func(cmd *cobra.Command, args []string) {
-		allAgents := agents.All()
+		allAgents := appEngine.AllAgents()
 
 		// Sort agents alphabetically
 		sort.Slice(allAgents, func(i, j int) bool {

@@ -49,16 +49,6 @@ type DownloadJobConfig struct {
 	WaitDuration func(bool)        // Optional throttling function (bool = isRetry)
 }
 
-// GetVolumeOverride checks if a volume override is set in the context
-func GetVolumeOverride(ctx context.Context) (*int, bool) {
-	if val := ctx.Value("volume_override"); val != nil {
-		if volNum, ok := val.(int); ok && volNum > 0 {
-			return &volNum, true
-		}
-	}
-	return nil, false
-}
-
 // DownloadChapter downloads a chapter with the given config
 func (d *DownloadService) DownloadChapter(ctx context.Context, config DownloadJobConfig) error {
 	// Use service client if not provided in config
@@ -66,8 +56,7 @@ func (d *DownloadService) DownloadChapter(ctx context.Context, config DownloadJo
 
 	// Check for volume override in context
 	if volumeOverride, hasOverride := GetVolumeOverride(ctx); hasOverride {
-		// Override volume in metadata
-		config.Metadata.VolumeNum = volumeOverride
+		config.Metadata.VolumeNum = &volumeOverride
 	}
 
 	// Step 1: Create a sanitized manga title directory

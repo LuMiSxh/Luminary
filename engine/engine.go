@@ -1,19 +1,20 @@
 package engine
 
 import (
+	"fmt"
 	"net/http"
 	"net/url"
 	"os"
 	"path/filepath"
 	"regexp"
 	"runtime"
+	"sync"
 	"time"
 )
 
 // Engine is the central component providing services to agents
 type Engine struct {
 	HTTP        *HTTPService
-	Cache       *CacheService
 	Download    *DownloadService
 	Parser      *ParserService
 	RateLimiter *RateLimiterService
@@ -23,6 +24,11 @@ type Engine struct {
 	API         *APIService
 	Extractor   *ExtractorService
 	Pagination  *PaginationService
+	Search      *SearchService // New SearchService
+
+	// Agent registry
+	agents      map[string]Agent
+	agentsMutex sync.RWMutex
 }
 
 // New creates a new Engine with default configuration
@@ -64,12 +70,6 @@ func New() *Engine {
 	httpService.RequestOptions.Headers.Set("Accept", "text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8")
 	httpService.RequestOptions.Headers.Set("Accept-Language", "en-US,en;q=0.5")
 
-	// Determine default cache directory
-	cacheDir := filepath.Join(os.TempDir(), "luminary-cache")
-	if homeDir, err := os.UserHomeDir(); err == nil {
-		cacheDir = filepath.Join(homeDir, ".luminary", "cache")
-	}
-
 	// Determine default log file
 	logFile := ""
 	if homeDir, err := os.UserHomeDir(); err == nil {
@@ -84,13 +84,6 @@ func New() *Engine {
 		Verbose: false,
 		LogFile: logFile,
 	}
-
-	// Create cache service
-	cacheService := NewCacheService(
-		24*time.Hour, // TTL of 24 hours
-		cacheDir,     // Cache directory
-		true,         // Use disk cache
-	)
 
 	// Create download service
 	downloadService := &DownloadService{
@@ -114,12 +107,12 @@ func New() *Engine {
 	// Create engine with all services
 	engine := &Engine{
 		HTTP:        httpService,
-		Cache:       cacheService,
 		Download:    downloadService,
 		Parser:      parser,
 		RateLimiter: rateLimiterService,
 		DOM:         domService,
 		Logger:      loggerService,
+		agents:      make(map[string]Agent),
 	}
 
 	// Create metadata service (depends on parser)
@@ -129,10 +122,62 @@ func New() *Engine {
 
 	// Create the new services
 	engine.Extractor = NewExtractorService(loggerService)
-	engine.API = NewAPIService(httpService, rateLimiterService, cacheService, loggerService)
+	engine.API = NewAPIService(httpService, rateLimiterService, loggerService)
 	engine.Pagination = NewPaginationService(engine.API, engine.Extractor, loggerService)
 
+	// Create the search service with dependencies from other services
+	engine.Search = NewSearchService(
+		loggerService,
+		engine.API,
+		engine.Extractor,
+		engine.Pagination,
+		rateLimiterService,
+	)
+
 	return engine
+}
+
+// RegisterAgent adds an agent to the registry
+func (e *Engine) RegisterAgent(agent Agent) error {
+	e.agentsMutex.Lock()
+	defer e.agentsMutex.Unlock()
+
+	if _, exists := e.agents[agent.ID()]; exists {
+		return fmt.Errorf("agent with ID '%s' already registered", agent.ID())
+	}
+
+	e.agents[agent.ID()] = agent
+	return nil
+}
+
+// GetAgent retrieves an agent by ID
+func (e *Engine) GetAgent(id string) (Agent, bool) {
+	e.agentsMutex.RLock()
+	defer e.agentsMutex.RUnlock()
+
+	agent, exists := e.agents[id]
+	return agent, exists
+}
+
+// AllAgents returns all registered agents
+func (e *Engine) AllAgents() []Agent {
+	e.agentsMutex.RLock()
+	defer e.agentsMutex.RUnlock()
+
+	agents := make([]Agent, 0, len(e.agents))
+	for _, a := range e.agents {
+		agents = append(agents, a)
+	}
+	return agents
+}
+
+// AgentExists checks if an agent exists
+func (e *Engine) AgentExists(id string) bool {
+	e.agentsMutex.RLock()
+	defer e.agentsMutex.RUnlock()
+
+	_, exists := e.agents[id]
+	return exists
 }
 
 // CompilePattern is a helper method for ParserService
@@ -146,15 +191,6 @@ func (p *ParserService) CompilePattern(pattern string) *regexp.Regexp {
 	re = regexp.MustCompile(pattern)
 	p.RegexPatterns[pattern] = re
 	return re
-}
-
-// Shutdown performs cleanup operations
-func (e *Engine) Shutdown() {
-	// Clean expired cache entries before shutting down
-	_, _ = e.Cache.CleanExpired()
-
-	// Perform any cleanup needed
-	e.Logger.Info("Engine shutting down")
 }
 
 // ExtractDomain extracts the domain from a URL

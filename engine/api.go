@@ -34,16 +34,14 @@ type APIConfig struct {
 type APIService struct {
 	HTTP        *HTTPService
 	RateLimiter *RateLimiterService
-	Cache       *CacheService
 	Logger      *LoggerService
 }
 
 // NewAPIService creates a new API service
-func NewAPIService(http *HTTPService, rateLimiter *RateLimiterService, cache *CacheService, logger *LoggerService) *APIService {
+func NewAPIService(http *HTTPService, rateLimiter *RateLimiterService, logger *LoggerService) *APIService {
 	return &APIService{
 		HTTP:        http,
 		RateLimiter: rateLimiter,
-		Cache:       cache,
 		Logger:      logger,
 	}
 }
@@ -78,16 +76,6 @@ func (a *APIService) FetchFromAPI(
 		queryParams := endpoint.QueryFormatter(params)
 		if len(queryParams) > 0 {
 			fullURL = fmt.Sprintf("%s?%s", fullURL, queryParams.Encode())
-		}
-	}
-
-	// Check cache before making request
-	cacheKey := fmt.Sprintf("api:%s:%s", config.RateLimitKey, fullURL)
-	if endpoint.Method == "GET" || endpoint.Method == "" {
-		var cachedResponse interface{}
-		if a.Cache.Get(cacheKey, &cachedResponse) {
-			a.Logger.Debug("Using cached response for: %s", fullURL)
-			return cachedResponse, nil
 		}
 	}
 
@@ -144,13 +132,6 @@ func (a *APIService) FetchFromAPI(
 		lastErr = err
 		if attempt == retryCount {
 			return nil, fmt.Errorf("API request failed after %d attempts: %w", retryCount+1, lastErr)
-		}
-	}
-
-	// Cache the response for GET requests
-	if endpoint.Method == "GET" || endpoint.Method == "" {
-		if err := a.Cache.Set(cacheKey, responseData); err != nil {
-			a.Logger.Warn("Failed to cache response: %v", err)
 		}
 	}
 

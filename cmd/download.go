@@ -1,7 +1,7 @@
 package cmd
 
 import (
-	"Luminary/agents"
+	"Luminary/engine"
 	"Luminary/utils"
 	"context"
 	"fmt"
@@ -38,11 +38,11 @@ var downloadCmd = &cobra.Command{
 		baseCtx := context.Background()
 
 		// Create a context with concurrency settings
-		ctx := agents.WithConcurrency(baseCtx, downloadConcurrent)
+		ctx := engine.WithConcurrency(baseCtx, downloadConcurrent)
 
 		// Add volume override to context if provided
 		if downloadHasVolume {
-			ctx = context.WithValue(ctx, "volume_override", downloadVolume)
+			ctx = engine.WithVolumeOverride(ctx, downloadVolume)
 		}
 
 		for _, combinedID := range args {
@@ -59,8 +59,8 @@ var downloadCmd = &cobra.Command{
 			}
 
 			// Validate that the agent exists
-			agent := agents.Get(agentID)
-			if agent == nil {
+			agent, exists := appEngine.GetAgent(agentID)
+			if !exists {
 				if apiMode {
 					utils.OutputJSON("error", nil, fmt.Errorf("agent '%s' not found", agentID))
 					return
@@ -68,7 +68,7 @@ var downloadCmd = &cobra.Command{
 
 				fmt.Printf("Error: Agent '%s' not found\n", agentID)
 				fmt.Println("Available agents:")
-				for _, a := range agents.All() {
+				for _, a := range appEngine.AllAgents() {
 					fmt.Printf("  - %s (%s)\n", a.ID(), a.Name())
 				}
 				return
