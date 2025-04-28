@@ -55,14 +55,8 @@ func New() *Engine {
 
 	// Create logger service first so we can use it in other services
 	loggerService := &LoggerService{
-		Verbose:   false,
-		DebugMode: false,
-		LogFile:   logFile,
-	}
-
-	// Initialize the logger
-	if err := loggerService.initLogger(); err != nil {
-		fmt.Printf("Failed to initialize logger: %v\n", err)
+		Verbose: false,
+		LogFile: logFile,
 	}
 
 	// Create HTTP service with logger
