@@ -24,7 +24,8 @@ type Engine struct {
 	API         *APIService
 	Extractor   *ExtractorService
 	Pagination  *PaginationService
-	Search      *SearchService // New SearchService
+	Search      *SearchService
+	WebScraper  *WebScraperService
 
 	// Agent registry
 	agents      map[string]Agent
@@ -102,6 +103,7 @@ func New() *Engine {
 	// Configure rate limiters for common sites
 	rateLimiterService.SetLimit("api.mangadex.org", 2*time.Second)
 	rateLimiterService.SetLimit("mangadex.org", 1*time.Second)
+	rateLimiterService.SetLimit("kissmanga.in", 2*time.Second)
 
 	// Create DOM service
 	domService := &DOMService{}
@@ -139,6 +141,9 @@ func New() *Engine {
 		engine.Pagination,
 		rateLimiterService,
 	)
+
+	// Create the WebScraper service
+	engine.WebScraper = NewWebScraperService(httpService, domService, rateLimiterService, loggerService)
 
 	loggerService.Info("Engine initialized successfully")
 	return engine

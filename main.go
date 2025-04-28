@@ -1,6 +1,7 @@
 package main
 
 import (
+	"Luminary/agents/kissmanga"
 	"Luminary/agents/mangadex"
 	"Luminary/cmd"
 	"Luminary/engine"
@@ -11,7 +12,13 @@ func registerAgents(e *engine.Engine) {
 	// Register MangaDex agent
 	err := e.RegisterAgent(mangadex.NewAgent(e))
 	if err != nil {
-		return
+		e.Logger.Error("Failed to register MangaDex agent: %v", err)
+	}
+
+	// Register KissManga agent
+	err = e.RegisterAgent(kissmanga.NewAgent(e))
+	if err != nil {
+		e.Logger.Error("Failed to register KissManga agent: %v", err)
 	}
 }
 

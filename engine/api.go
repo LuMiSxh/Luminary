@@ -3,7 +3,6 @@ package engine
 import (
 	"Luminary/errors"
 	"context"
-	"encoding/json"
 	"fmt"
 	"net/http"
 	"net/url"
@@ -214,7 +213,7 @@ func BuildQueryParams(options interface{}) url.Values {
 		fieldValue := v.Field(i)
 
 		// Skip unexported fields
-		if field.PkgPath != "" { // This is how you check if a field is exported in Go
+		if field.PkgPath != "" {
 			continue
 		}
 
@@ -299,9 +298,4 @@ func DefaultPathFormatter(path string, params ...string) string {
 		return strings.Replace(path, "{id}", params[0], 1)
 	}
 	return path
-}
-
-// ParseResponseBody parses a JSON response body into the given result type
-func ParseResponseBody(data []byte, result interface{}) error {
-	return json.Unmarshal(data, result)
 }
