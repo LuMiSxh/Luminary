@@ -2,6 +2,7 @@ package cmd
 
 import (
 	"Luminary/engine"
+	"Luminary/errors" // Import our custom errors package
 	"Luminary/utils"
 	"context"
 	"fmt"
@@ -11,11 +12,13 @@ import (
 )
 
 var (
-	listAgent string
-	listLimit int
+	listAgent     string
+	listLimit     int
+	listPages     int
+	listDebugMode bool // Debug flag for detailed error information
 )
 
-// MangaListItem represents a manga item for API list responses
+// MangaListItem represents a manga item for API responses
 type MangaListItem struct {
 	ID        string `json:"id"`
 	Title     string `json:"title"`
@@ -28,8 +31,21 @@ var listCmd = &cobra.Command{
 	Short: "List all available manga",
 	Long:  `List all manga from all agents or a specific agent.`,
 	Run: func(cmd *cobra.Command, args []string) {
-		ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+		// Determine if we're using multiple agents
+		multipleAgents := listAgent == ""
+
+		// Calculate appropriate timeout
+		timeoutDuration := calculateListTimeout(listLimit, listPages, multipleAgents)
+
+		// Create context with dynamic timeout
+		ctx, cancel := context.WithTimeout(context.Background(), timeoutDuration)
 		defer cancel()
+
+		// Inform user about extended timeout if applicable
+		if timeoutDuration > time.Minute && !apiMode {
+			fmt.Printf("Note: Using extended timeout of %v for this request.\n",
+				timeoutDuration.Round(time.Second))
+		}
 
 		// Validate the agent if specified
 		var selectedAgent engine.Agent
@@ -54,18 +70,8 @@ var listCmd = &cobra.Command{
 		// Create search options using the engine type
 		options := engine.SearchOptions{
 			Limit: listLimit,
+			Pages: listPages,
 			// We use empty search to get a list of manga
-		}
-
-		// Check if unlimited fetching is requested
-		if options.Limit == 0 && !apiMode {
-			fmt.Println("Warning: Fetching all available manga. This may take some time...")
-
-			// For unlimited fetches, we should use a longer timeout
-			// Cancel the existing context and create a new one with a longer timeout
-			cancel()
-			ctx, cancel = context.WithTimeout(context.Background(), 5*time.Minute)
-			defer cancel()
 		}
 
 		if apiMode {
@@ -76,6 +82,8 @@ var listCmd = &cobra.Command{
 				// Use empty search to get list of manga
 				mangas, err := agent.Search(ctx, "", options)
 				if err != nil {
+					// Handle errors but continue with other agents
+					handleListError(err, agent.ID(), agent.Name(), true)
 					return
 				}
 
@@ -114,18 +122,32 @@ var listCmd = &cobra.Command{
 		} else {
 			// Interactive mode for CLI users
 			if selectedAgent != nil {
-				fmt.Printf("Listing manga from agent: %s (%s)\n\n", selectedAgent.ID(), selectedAgent.Name())
+				fmt.Printf("Listing manga from agent: %s (%s)\n", selectedAgent.ID(), selectedAgent.Name())
+				fmt.Printf("Limit: %d manga per page\n", options.Limit)
+				if options.Pages > 0 {
+					fmt.Printf("Pages: %d\n", options.Pages)
+				} else {
+					fmt.Println("Pages: all available")
+				}
+				fmt.Println()
 
 				// Use empty search to get list of manga
 				mangas, err := selectedAgent.Search(ctx, "", options)
 				if err != nil {
-					fmt.Printf("Error: %v\n", err)
+					handleListError(err, selectedAgent.ID(), selectedAgent.Name(), false)
 					return
 				}
 
 				displayMangaList(mangas, selectedAgent)
 			} else {
 				fmt.Println("Listing manga from all agents:")
+				fmt.Printf("Limit: %d manga per page\n", options.Limit)
+				if options.Pages > 0 {
+					fmt.Printf("Pages: %d\n", options.Pages)
+				} else {
+					fmt.Println("Pages: all available")
+				}
+				fmt.Println()
 
 				for _, agent := range appEngine.AllAgents() {
 					fmt.Printf("\nFrom agent: %s (%s)\n", agent.ID(), agent.Name())
@@ -133,7 +155,8 @@ var listCmd = &cobra.Command{
 					// Use empty search to get list of manga
 					mangas, err := agent.Search(ctx, "", options)
 					if err != nil {
-						fmt.Printf("  Error: %v\n", err)
+						// In multi-agent mode, we show errors but continue with other agents
+						handleListError(err, agent.ID(), agent.Name(), true)
 						continue
 					}
 
@@ -142,6 +165,92 @@ var listCmd = &cobra.Command{
 			}
 		}
 	},
+}
+
+// handleListError provides user-friendly error messages based on error type
+func handleListError(err error, agentID, agentName string, continueOnError bool) {
+	// For API mode or when we should continue despite errors
+	if apiMode || continueOnError {
+		if apiMode {
+			// In API mode, we generally don't report errors for individual agents
+			// but we could add them to a "errors" section in the response if needed
+			return
+		}
+
+		// For CLI with continue flag, show brief error but continue
+		if errors.IsServerError(err) {
+			fmt.Printf("  Error: Server error from %s. Skipping.\n", agentName)
+		} else if errors.Is(err, errors.ErrRateLimit) {
+			fmt.Printf("  Error: Rate limit exceeded for %s. Skipping.\n", agentName)
+		} else if errors.Is(err, context.DeadlineExceeded) {
+			fmt.Printf("  Error: Timeout fetching from %s. Skipping.\n", agentName)
+		} else {
+			fmt.Printf("  Error: %v\n", err)
+		}
+
+		if listDebugMode {
+			fmt.Printf("  Debug details: %v\n", err)
+		}
+		return
+	}
+
+	// For CLI mode with a single agent (no continuation)
+	if errors.IsServerError(err) {
+		fmt.Printf("Error: Server error from %s. Please try again later.\n", agentName)
+	} else if errors.Is(err, errors.ErrRateLimit) {
+		fmt.Printf("Error: Rate limit exceeded for %s. Please try again later.\n", agentName)
+	} else if errors.Is(err, context.DeadlineExceeded) {
+		fmt.Printf("Error: Timeout while fetching manga list. Try reducing the number of pages.\n")
+	} else {
+		fmt.Printf("Error: %v\n", err)
+	}
+
+	if listDebugMode {
+		// Print more detailed error info in debug mode
+		fmt.Println("\nDebug error details:")
+		fmt.Printf("  Agent: %s\n", agentID)
+		fmt.Printf("  Error type: %T\n", err)
+		fmt.Printf("  Full error: %+v\n", err)
+	}
+}
+
+// Calculate an appropriate timeout based on pagination parameters for list command
+func calculateListTimeout(limit, pages int, multipleAgents bool) time.Duration {
+	// Base timeout
+	timeoutDuration := 60 * time.Second
+
+	// Adjust for pagination parameters
+	if limit == 0 || pages == 0 {
+		// For unlimited requests, start with a higher base timeout
+		timeoutDuration = 5 * time.Minute
+
+		// If both are unlimited, use a maximum timeout
+		if limit == 0 && pages == 0 {
+			timeoutDuration = 10 * time.Minute
+		}
+	} else if pages > 3 || limit > 50 {
+		// For larger paginated requests
+		timeoutDuration = 3 * time.Minute
+
+		// Scale with number of pages
+		if pages > 5 {
+			pageTimeoutFactor := time.Duration(pages) / 5
+			if pageTimeoutFactor > 1 {
+				extraTimeout := pageTimeoutFactor * time.Minute
+				if extraTimeout > 5*time.Minute {
+					extraTimeout = 5 * time.Minute // Cap at 5 extra minutes
+				}
+				timeoutDuration += extraTimeout
+			}
+		}
+	}
+
+	// Add extra time if querying multiple agents
+	if multipleAgents {
+		timeoutDuration += 2 * time.Minute
+	}
+
+	return timeoutDuration
 }
 
 // Helper function to display a manga list in a user-friendly format
@@ -163,5 +272,7 @@ func init() {
 
 	// Flags
 	listCmd.Flags().StringVar(&listAgent, "agent", "", "Specific agent to list manga from (default: all)")
-	listCmd.Flags().IntVar(&listLimit, "limit", 50, "Limit number of results per agent (limit 0 for all)")
+	listCmd.Flags().IntVar(&listLimit, "limit", 50, "Limit number of results per page (limit 0 for all)")
+	listCmd.Flags().IntVar(&listPages, "pages", 1, "Number of pages to fetch (0 for all pages)")
+	listCmd.Flags().BoolVar(&listDebugMode, "debug", false, "Show detailed error information")
 }

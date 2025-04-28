@@ -238,31 +238,31 @@ func (m *MyService) configureExtractors() {
         Extractors: []engine.Extractor{
             {
                 Name:       "ID",
-                SourcePath: []string{"id"},
+                SourcePath: []string{"ID"},  // <- These Path Names have to correspond to their interface
                 TargetPath: "ID",
                 Required:   true,
             },
             {
                 Name:       "Title",
-                SourcePath: []string{"title"},
+                SourcePath: []string{"Title"},
                 TargetPath: "Title",
                 Required:   true,
             },
             {
                 Name:       "Description",
-                SourcePath: []string{"description"},
+                SourcePath: []string{"Description"},
                 TargetPath: "Description",
                 Required:   false,
             },
             {
                 Name:       "Cover",
-                SourcePath: []string{"cover_url"},
+                SourcePath: []string{"CoverUrl"},
                 TargetPath: "Cover",
                 Required:   false,
             },
             {
                 Name:       "Authors",
-                SourcePath: []string{"authors"},
+                SourcePath: []string{"Authors"},
                 TargetPath: "Authors",
                 Transform: func (value interface{}) interface{} {
                     // Transform the authors data if needed
@@ -282,13 +282,13 @@ func (m *MyService) configureExtractors() {
         Extractors: []engine.Extractor{
             {
                 Name:       "ID",
-                SourcePath: []string{"id"},
+                SourcePath: []string{"ID"},
                 TargetPath: "ID",
                 Required:   true,
             },
             {
                 Name:       "Title",
-                SourcePath: []string{"title"},
+                SourcePath: []string{"Title"},
                 TargetPath: "Title",
                 Required:   true,
             },
@@ -303,19 +303,19 @@ func (m *MyService) configureExtractors() {
         Extractors: []engine.Extractor{
             {
                 Name:       "ID",
-                SourcePath: []string{"id"},
+                SourcePath: []string{"ID"},
                 TargetPath: "Info.ID",
                 Required:   true,
             },
             {
                 Name:       "Title",
-                SourcePath: []string{"title"},
+                SourcePath: []string{"Title"},
                 TargetPath: "Info.Title",
                 Required:   false,
             },
             {
                 Name:       "Number",
-                SourcePath: []string{"number"},
+                SourcePath: []string{"Number"},
                 TargetPath: "Info.Number",
                 Transform: func (value interface{}) interface{} {
                     // Convert string to float64 if needed
@@ -352,8 +352,8 @@ func (m *MyService) Search(ctx context.Context, query string, options engine.Sea
         engine.PaginationConfig{
             LimitParam:     "limit",
             OffsetParam:    "offset",
-            TotalCountPath: []string{"total"},
-            ItemsPath:      []string{"results"},
+            TotalCountPath: []string{"Total"},
+            ItemsPath:      []string{"Results"},
             DefaultLimit:   20,
             MaxLimit:       100,
         },

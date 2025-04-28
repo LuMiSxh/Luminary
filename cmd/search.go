@@ -2,6 +2,7 @@ package cmd
 
 import (
 	"Luminary/engine"
+	"Luminary/errors" // Import our custom errors package
 	"Luminary/utils"
 	"context"
 	"fmt"
@@ -14,11 +15,13 @@ import (
 var (
 	searchAgent      string
 	searchLimit      int
+	searchPages      int
 	searchSort       string
 	searchFields     []string
 	fieldFilters     map[string]string
 	includeAltTitles bool
 	includeAllLangs  bool
+	searchDebugMode  bool // Debug flag for detailed error information
 )
 
 // MangaSearchResult represents a manga search result for API output
@@ -40,12 +43,27 @@ var searchCmd = &cobra.Command{
 	Args:  cobra.ExactArgs(1),
 	Run: func(cmd *cobra.Command, args []string) {
 		query := args[0]
-		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+
+		// Determine if we're using multiple agents
+		multipleAgents := searchAgent == ""
+
+		// Calculate appropriate timeout based on pagination parameters
+		timeoutDuration := calculateTimeout(searchLimit, searchPages, multipleAgents)
+
+		// Create context with dynamic timeout
+		ctx, cancel := context.WithTimeout(context.Background(), timeoutDuration)
 		defer cancel()
+
+		// Inform user about extended timeout if applicable
+		if timeoutDuration > time.Minute && !apiMode {
+			fmt.Printf("Note: Using extended timeout of %v for this request.\n",
+				timeoutDuration.Round(time.Second))
+		}
 
 		// Create search options from flags
 		options := engine.SearchOptions{
 			Limit:   searchLimit,
+			Pages:   searchPages,
 			Fields:  searchFields,
 			Filters: fieldFilters,
 			Sort:    searchSort,
@@ -82,11 +100,7 @@ var searchCmd = &cobra.Command{
 		)
 
 		if err != nil {
-			if apiMode {
-				utils.OutputJSON("error", nil, err)
-			} else {
-				fmt.Printf("Error searching: %v\n", err)
-			}
+			handleSearchError(err, query, searchAgent)
 			return
 		}
 
@@ -96,6 +110,104 @@ var searchCmd = &cobra.Command{
 			displayConsoleResults(results, query, options)
 		}
 	},
+}
+
+// handleSearchError provides user-friendly error messages based on error type
+func handleSearchError(err error, query, agentSpec string) {
+	// Determine agent name for display
+	agentName := "all agents"
+	if agentSpec != "" {
+		agentName = agentSpec
+	}
+
+	// Check for specific error types in order of specificity
+	if errors.IsServerError(err) {
+		if apiMode {
+			utils.OutputJSON("error", nil, fmt.Errorf("server error from %s: %v", agentName, err))
+		} else {
+			fmt.Printf("Error: Server error while searching with %s. Please try again later.\n", agentName)
+			if searchDebugMode {
+				fmt.Printf("Debug details: %v\n", err)
+			}
+		}
+		return
+	}
+
+	// Check for rate limiting
+	if errors.Is(err, errors.ErrRateLimit) {
+		if apiMode {
+			utils.OutputJSON("error", nil, fmt.Errorf("rate limit exceeded for %s", agentName))
+		} else {
+			fmt.Printf("Error: Rate limit exceeded for %s. Please try again later.\n", agentName)
+		}
+		return
+	}
+
+	// Check for timeout errors
+	if errors.Is(err, context.DeadlineExceeded) {
+		if apiMode {
+			utils.OutputJSON("error", nil, fmt.Errorf("search timed out for query '%s'", query))
+		} else {
+			fmt.Printf("Error: Search timed out. Try reducing the number of pages or increasing the time limit.\n")
+		}
+		return
+	}
+
+	// Generic error handling
+	if apiMode {
+		utils.OutputJSON("error", nil, err)
+	} else {
+		fmt.Printf("Error searching: %v\n", err)
+		if searchDebugMode {
+			// Print more detailed error info in debug mode
+			fmt.Println("\nDebug error details:")
+			fmt.Printf("  Query: %s\n", query)
+			if agentSpec != "" {
+				fmt.Printf("  Agent: %s\n", agentSpec)
+			}
+			fmt.Printf("  Error type: %T\n", err)
+			fmt.Printf("  Full error: %+v\n", err)
+		}
+	}
+}
+
+// Calculate an appropriate timeout based on pagination parameters
+func calculateTimeout(limit, pages int, multipleAgents bool) time.Duration {
+	// Base timeout
+	timeoutDuration := 30 * time.Second
+
+	// Adjust for pagination parameters
+	if limit == 0 || pages == 0 {
+		// For unlimited requests, start with a higher base timeout
+		timeoutDuration = 5 * time.Minute
+
+		// If both are unlimited, use a maximum timeout
+		if limit == 0 && pages == 0 {
+			timeoutDuration = 10 * time.Minute
+		}
+	} else if pages > 3 || limit > 50 {
+		// For larger paginated requests
+		timeoutDuration = 3 * time.Minute
+
+		// Scale with number of pages
+		if pages > 5 {
+			pageTimeoutFactor := time.Duration(pages) / 5
+			if pageTimeoutFactor > 1 {
+				extraTimeout := pageTimeoutFactor * time.Minute
+				if extraTimeout > 5*time.Minute {
+					extraTimeout = 5 * time.Minute // Cap at 5 extra minutes
+				}
+				timeoutDuration += extraTimeout
+			}
+		}
+	}
+
+	// Add extra time if querying multiple agents
+	if multipleAgents {
+		timeoutDuration += 2 * time.Minute
+	}
+
+	return timeoutDuration
 }
 
 // outputAPIResults formats and outputs search results as JSON for API mode
@@ -161,7 +273,12 @@ func displayConsoleResults(results map[string][]engine.Manga, query string, opti
 	if includeAllLangs {
 		fmt.Println("Searching across all languages: enabled")
 	}
-	fmt.Printf("Result limit: %d\n", options.Limit)
+	fmt.Printf("Result limit: %d per page\n", options.Limit)
+	if options.Pages > 0 {
+		fmt.Printf("Pages fetched: %d\n", options.Pages)
+	} else {
+		fmt.Println("Pages fetched: all available")
+	}
 
 	// Display field-specific filters
 	if len(options.Filters) > 0 {
@@ -179,7 +296,7 @@ func displayConsoleResults(results map[string][]engine.Manga, query string, opti
 		for agentID, mangaList := range results {
 			agent, _ := appEngine.GetAgent(agentID)
 			fmt.Printf("Results from %s (%s):\n", agent.ID(), agent.Name())
-			displaySearchResults(mangaList, agent)
+			fmt.Print(engine.DisplaySearchResults(mangaList, agent))
 		}
 	} else {
 		// Display results from all agents
@@ -191,62 +308,9 @@ func displayConsoleResults(results map[string][]engine.Manga, query string, opti
 
 			agent, _ := appEngine.GetAgent(agentID)
 			fmt.Printf("\nFrom %s (%s):\n", agent.ID(), agent.Name())
-			displaySearchResults(mangaList, agent)
+			fmt.Print(engine.DisplaySearchResults(mangaList, agent))
 		}
 	}
-}
-
-// Helper function to display search results in a user-friendly format
-func displaySearchResults(results []engine.Manga, agent engine.Agent) {
-	if len(results) == 0 {
-		fmt.Println("  No results found")
-		return
-	}
-
-	fmt.Printf("  Found %d results:\n", len(results))
-	for i, manga := range results {
-		fmt.Printf("  %d. %s (ID: %s:%s)\n", i+1, manga.Title, agent.ID(), manga.ID)
-
-		// Display alternative titles if available
-		if len(manga.AltTitles) > 0 {
-			// Deduplicate alternative titles (in case the same title appears in multiple languages)
-			uniqueTitles := make(map[string]bool)
-			var displayTitles []string
-
-			for _, title := range manga.AltTitles {
-				if !uniqueTitles[title] {
-					uniqueTitles[title] = true
-					displayTitles = append(displayTitles, title)
-				}
-			}
-
-			if len(displayTitles) > 0 {
-				// Show up to 3 alternative titles
-				fmt.Printf("     Also known as: %s\n", strings.Join(displayTitles[:minInt(3, len(displayTitles))], ", "))
-				if len(displayTitles) > 3 {
-					fmt.Printf("     ...and %d more alternative titles\n", len(displayTitles)-3)
-				}
-			}
-		}
-
-		if len(manga.Authors) > 0 {
-			fmt.Printf("     Authors: %s\n", strings.Join(manga.Authors, ", "))
-		}
-		if len(manga.Tags) > 0 {
-			fmt.Printf("     Tags: %s\n", strings.Join(manga.Tags[:minInt(5, len(manga.Tags))], ", "))
-			if len(manga.Tags) > 5 {
-				fmt.Printf("     ...and %d more tags\n", len(manga.Tags)-5)
-			}
-		}
-	}
-}
-
-// Helper function for min of two integers
-func minInt(a, b int) int {
-	if a < b {
-		return a
-	}
-	return b
 }
 
 func init() {
@@ -254,11 +318,13 @@ func init() {
 
 	// Flags
 	searchCmd.Flags().StringVar(&searchAgent, "agent", "", "Search using specific agent")
-	searchCmd.Flags().IntVar(&searchLimit, "limit", 10, "Limit number of results")
+	searchCmd.Flags().IntVar(&searchLimit, "limit", 10, "Limit number of results per page")
+	searchCmd.Flags().IntVar(&searchPages, "pages", 1, "Number of pages to fetch (0 for all pages)")
 	searchCmd.Flags().StringVar(&searchSort, "sort", "relevance", "Sort by (relevance, name, newest, updated)")
 	searchCmd.Flags().StringSliceVar(&searchFields, "fields", []string{}, "Fields to search in (title, author, genre), empty means all")
 	searchCmd.Flags().BoolVar(&includeAltTitles, "alt-titles", true, "Include alternative titles in search")
 	searchCmd.Flags().BoolVar(&includeAllLangs, "all-langs", true, "Search across all language versions of titles")
+	searchCmd.Flags().BoolVar(&searchDebugMode, "debug", false, "Show detailed error information")
 
 	// Field-specific filters
 	fieldFilters = make(map[string]string)

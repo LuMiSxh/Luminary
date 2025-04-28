@@ -12,7 +12,8 @@ import (
 // SearchOptions for search customization
 type SearchOptions struct {
 	Query   string            // The search query string
-	Limit   int               // Maximum number of results to return
+	Limit   int               // Maximum number of results per page
+	Pages   int               // Number of pages to fetch (0 for all pages)
 	Fields  []string          // Fields to search within (e.g., "title", "author", "description")
 	Filters map[string]string // Field-specific filters
 	Sort    string            // Sort order (e.g., "relevance", "name")
@@ -55,17 +56,17 @@ func (s *SearchService) ExecuteSearch(
 	extractorSet ExtractorSet,
 ) ([]Manga, error) {
 	// Log search request
-	s.Logger.Info("[%s] Searching for: %s (limit: %d)", agentID, query, options.Limit)
+	s.Logger.Info("[%s] Searching for: %s (limit: %d, pages: %d)", agentID, query, options.Limit, options.Pages)
 
 	// Apply rate limiting
 	domain := extractDomainFromUrl(apiConfig.BaseURL)
 	s.RateLimiter.Wait(domain)
 
-	maxPages := 1 // Default to 1 page
-	if options.Limit == 0 {
-		// If the limit is 0, fetch all pages by setting maxPages to 0
-		maxPages = 0
-		s.Logger.Info("[%s] Unlimited fetching enabled. This may take some time...", agentID)
+	// Determine maximum pages to fetch
+	maxPages := options.Pages
+	if maxPages == 0 {
+		// If pages is 0, fetch all pages by setting maxPages to 0
+		s.Logger.Info("[%s] Unlimited page fetching enabled. This may take some time...", agentID)
 	}
 
 	// Use pagination service to fetch results
@@ -111,9 +112,11 @@ func (s *SearchService) ExecuteSearch(
 		results = s.SortResults(results, options.Sort)
 	}
 
-	// Apply limit if specified
-	if options.Limit > 0 && len(results) > options.Limit {
-		results = results[:options.Limit]
+	// Apply final limit if specified
+	// Note: This is different from the per-page limit handled by pagination
+	// This applies to the total number of results after all pages are fetched
+	if options.Limit > 0 && options.Pages != 1 && len(results) > options.Limit*options.Pages {
+		results = results[:options.Limit*options.Pages]
 	}
 
 	s.Logger.Info("[%s] Found %d results for: %s", agentID, len(results), query)

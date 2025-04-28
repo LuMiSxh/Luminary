@@ -1,6 +1,7 @@
 package cmd
 
 import (
+	"Luminary/errors" // Add our custom errors package
 	"Luminary/utils"
 	"context"
 	"fmt"
@@ -10,26 +11,8 @@ import (
 	"github.com/spf13/cobra"
 )
 
-// ChapterInfo represents chapter data for API responses
-type ChapterInfo struct {
-	ID     string    `json:"id"`
-	Title  string    `json:"title"`
-	Number float64   `json:"number"`
-	Date   time.Time `json:"date"`
-}
-
-// MangaInfo represents manga data for API responses
-type MangaInfo struct {
-	ID          string        `json:"id"`
-	Title       string        `json:"title"`
-	Agent       string        `json:"agent"`
-	AgentName   string        `json:"agent_name"`
-	Description string        `json:"description"`
-	Authors     []string      `json:"authors,omitempty"`
-	Status      string        `json:"status,omitempty"`
-	Tags        []string      `json:"tags,omitempty"`
-	Chapters    []ChapterInfo `json:"chapters,omitempty"`
-}
+// Add --debug flag for detailed error information when needed
+var infoDebugMode bool
 
 var infoCmd = &cobra.Command{
 	Use:   "info [agent:manga-id]",
@@ -65,51 +48,62 @@ var infoCmd = &cobra.Command{
 			return
 		}
 
-		// Get manga info
-		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+		// Calculate an appropriate timeout based on the operation
+		// Fetching manga info with all chapters can be time-consuming
+		timeoutDuration := 60 * time.Second
+
+		// Create context with the calculated timeout
+		ctx, cancel := context.WithTimeout(context.Background(), timeoutDuration)
 		defer cancel()
 
+		// Get manga info
 		manga, err := agent.GetManga(ctx, mangaID)
 		if err != nil {
-			if apiMode {
-				utils.OutputJSON("error", nil, err)
-				return
-			}
+			// Use our handleMangaError helper which handles different error types
+			handleMangaError(err, agentID, mangaID, agent.Name())
+			return
+		}
 
-			fmt.Printf("Error retrieving manga: %v\n", err)
+		// Verify we got valid manga data
+		if manga == nil || manga.Title == "" {
+			if apiMode {
+				utils.OutputJSON("error", nil, fmt.Errorf("retrieved empty or invalid manga data"))
+			} else {
+				fmt.Println("Error: Retrieved empty or invalid manga data")
+			}
 			return
 		}
 
 		if apiMode {
-			// Create structured manga info for API response
-			mangaInfo := MangaInfo{
-				ID:          utils.FormatMangaID(agentID, mangaID),
-				Title:       manga.Title,
-				Agent:       agentID,
-				AgentName:   agent.Name(),
-				Description: manga.Description,
-				Authors:     manga.Authors,
-				Status:      manga.Status,
-				Tags:        manga.Tags,
+			// Format chapters for API output
+			chapters := make([]map[string]interface{}, len(manga.Chapters))
+			for i, ch := range manga.Chapters {
+				chapters[i] = map[string]interface{}{
+					"id":     utils.FormatMangaID(agentID, ch.ID),
+					"title":  ch.Title,
+					"number": ch.Number,
+					"date":   ch.Date,
+				}
 			}
 
-			// Add chapters info
-			for _, chapter := range manga.Chapters {
-				chapterInfo := ChapterInfo{
-					ID:     utils.FormatMangaID(agentID, chapter.ID),
-					Title:  chapter.Title,
-					Number: chapter.Number,
-					Date:   chapter.Date,
-				}
-				mangaInfo.Chapters = append(mangaInfo.Chapters, chapterInfo)
+			apiResponse := map[string]interface{}{
+				"manga": map[string]interface{}{
+					"id":          utils.FormatMangaID(agentID, manga.ID),
+					"title":       manga.Title,
+					"agent":       agentID,
+					"agent_name":  agent.Name(),
+					"description": manga.Description,
+					"authors":     manga.Authors,
+					"status":      manga.Status,
+					"tags":        manga.Tags,
+					"chapters":    chapters,
+				},
 			}
 
 			// Output the manga info
-			utils.OutputJSON("success", map[string]interface{}{
-				"manga": mangaInfo,
-			}, nil)
+			utils.OutputJSON("success", apiResponse, nil)
 		} else {
-			// Interactive mode for CLI users
+			// Interactive CLI output
 			fmt.Printf("Manga: %s\n", manga.Title)
 			fmt.Printf("ID: %s:%s\n", agentID, mangaID)
 
@@ -142,6 +136,61 @@ var infoCmd = &cobra.Command{
 	},
 }
 
+// handleMangaError provides user-friendly error messages based on error type
+func handleMangaError(err error, agentID, mangaID, agentName string) {
+	// Check for specific error types in order of specificity
+	if errors.IsNotFound(err) {
+		// Not found error
+		if apiMode {
+			utils.OutputJSON("error", nil, fmt.Errorf("manga '%s' not found on %s", mangaID, agentName))
+		} else {
+			fmt.Printf("Error: Manga '%s' not found on %s\n", mangaID, agentName)
+		}
+		return
+	}
+
+	// Check for server errors
+	if errors.IsServerError(err) {
+		if apiMode {
+			utils.OutputJSON("error", nil, fmt.Errorf("server error from %s: %v", agentName, err))
+		} else {
+			fmt.Printf("Error: Server error from %s. Please try again later.\n", agentName)
+			if infoDebugMode {
+				fmt.Printf("Debug details: %v\n", err)
+			}
+		}
+		return
+	}
+
+	// Check for rate limiting
+	if errors.Is(err, errors.ErrRateLimit) {
+		if apiMode {
+			utils.OutputJSON("error", nil, fmt.Errorf("rate limit exceeded for %s", agentName))
+		} else {
+			fmt.Printf("Error: Rate limit exceeded for %s. Please try again later.\n", agentName)
+		}
+		return
+	}
+
+	// Generic error handling
+	if apiMode {
+		utils.OutputJSON("error", nil, err)
+	} else {
+		fmt.Printf("Error retrieving manga: %v\n", err)
+		if infoDebugMode {
+			// Print more detailed error info in debug mode
+			fmt.Println("\nDebug error details:")
+			fmt.Printf("  Agent: %s\n", agentID)
+			fmt.Printf("  Manga ID: %s\n", mangaID)
+			fmt.Printf("  Error type: %T\n", err)
+			fmt.Printf("  Full error: %+v\n", err)
+		}
+	}
+}
+
 func init() {
 	rootCmd.AddCommand(infoCmd)
+
+	// Add debug flag for detailed error information
+	infoCmd.Flags().BoolVar(&infoDebugMode, "debug", false, "Show detailed error information")
 }

@@ -3,8 +3,9 @@ package cmd
 import (
 	"Luminary/engine"
 	"fmt"
-	"github.com/spf13/cobra"
 	"os"
+
+	"github.com/spf13/cobra"
 )
 
 var apiMode bool

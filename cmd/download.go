@@ -2,6 +2,7 @@ package cmd
 
 import (
 	"Luminary/engine"
+	"Luminary/errors" // Import our custom errors package
 	"Luminary/utils"
 	"context"
 	"fmt"
@@ -16,6 +17,7 @@ var (
 	downloadConcurrent int
 	downloadVolume     int  // Volume flag
 	downloadHasVolume  bool // Track if the volume flag was provided
+	downloadDebugMode  bool // Debug flag for detailed error information
 )
 
 // DownloadInfo represents download info for API responses
@@ -116,12 +118,7 @@ var downloadCmd = &cobra.Command{
 			cancel()
 
 			if err != nil {
-				if apiMode {
-					utils.OutputJSON("error", nil, err)
-					return
-				}
-
-				_, _ = fmt.Fprintf(os.Stderr, "Error downloading chapter: %v\n", err)
+				handleDownloadError(err, agentID, chapterID, agent.Name(), outputDir)
 				return
 			}
 
@@ -141,12 +138,77 @@ var downloadCmd = &cobra.Command{
 	},
 }
 
+// handleDownloadError provides user-friendly error messages based on error type
+func handleDownloadError(err error, agentID, chapterID, agentName, outputDir string) {
+	// Check for specific error types in order of specificity
+	if errors.IsNotFound(err) {
+		// Not found error
+		if apiMode {
+			utils.OutputJSON("error", nil, fmt.Errorf("chapter '%s' not found on %s", chapterID, agentName))
+		} else {
+			fmt.Printf("Error: Chapter '%s' not found on %s\n", chapterID, agentName)
+		}
+		return
+	}
+
+	// Check for server errors
+	if errors.IsServerError(err) {
+		if apiMode {
+			utils.OutputJSON("error", nil, fmt.Errorf("server error from %s: %v", agentName, err))
+		} else {
+			fmt.Printf("Error: Server error from %s. Please try again later.\n", agentName)
+			if downloadDebugMode {
+				fmt.Printf("Debug details: %v\n", err)
+			}
+		}
+		return
+	}
+
+	// Check for rate limiting
+	if errors.Is(err, errors.ErrRateLimit) {
+		if apiMode {
+			utils.OutputJSON("error", nil, fmt.Errorf("rate limit exceeded for %s", agentName))
+		} else {
+			fmt.Printf("Error: Rate limit exceeded for %s. Please try again later.\n", agentName)
+		}
+		return
+	}
+
+	// File system errors
+	var ioErr *os.PathError
+	if errors.As(err, &ioErr) {
+		if apiMode {
+			utils.OutputJSON("error", nil, fmt.Errorf("file system error: %v", ioErr))
+		} else {
+			fmt.Printf("Error: Failed to access output directory '%s': %v\n", outputDir, ioErr)
+			fmt.Println("Make sure the directory exists and you have write permissions.")
+		}
+		return
+	}
+
+	// Generic error handling
+	if apiMode {
+		utils.OutputJSON("error", nil, err)
+	} else {
+		fmt.Printf("Error downloading chapter: %v\n", err)
+		if downloadDebugMode {
+			// Print more detailed error info in debug mode
+			fmt.Println("\nDebug error details:")
+			fmt.Printf("  Agent: %s\n", agentID)
+			fmt.Printf("  Chapter ID: %s\n", chapterID)
+			fmt.Printf("  Error type: %T\n", err)
+			fmt.Printf("  Full error: %+v\n", err)
+		}
+	}
+}
+
 func init() {
 	rootCmd.AddCommand(downloadCmd)
 
 	// Flags
 	downloadCmd.Flags().StringVar(&downloadOutput, "output", "./downloads", "Output directory")
 	downloadCmd.Flags().IntVar(&downloadConcurrent, "concurrent", 5, "Number of concurrent downloads")
+	downloadCmd.Flags().BoolVar(&downloadDebugMode, "debug", false, "Show detailed error information")
 
 	// Add volume flag
 	downloadCmd.Flags().IntVar(&downloadVolume, "vol", 0, "Set or override the volume number")

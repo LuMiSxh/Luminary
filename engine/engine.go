@@ -44,6 +44,28 @@ func New() *Engine {
 		},
 	}
 
+	// Determine default log file
+	logFile := ""
+	if homeDir, err := os.UserHomeDir(); err == nil {
+		logDir := filepath.Join(homeDir, ".luminary", "logs")
+		if err := os.MkdirAll(logDir, 0755); err == nil {
+			logFile = filepath.Join(logDir, "luminary.log")
+		}
+	}
+
+	// Create logger service first so we can use it in other services
+	loggerService := &LoggerService{
+		Verbose:   false,
+		DebugMode: false,
+		LogFile:   logFile,
+	}
+
+	// Initialize the logger
+	if err := loggerService.initLogger(); err != nil {
+		fmt.Printf("Failed to initialize logger: %v\n", err)
+	}
+
+	// Create HTTP service with logger
 	httpService := &HTTPService{
 		DefaultClient: &http.Client{
 			Timeout: 30 * time.Second,
@@ -64,26 +86,12 @@ func New() *Engine {
 		DefaultTimeout:     30 * time.Second,
 		ThrottleTimeAPI:    2 * time.Second,
 		ThrottleTimeImages: 500 * time.Millisecond,
+		Logger:             loggerService,
 	}
 
 	// Set common headers
 	httpService.RequestOptions.Headers.Set("Accept", "text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8")
 	httpService.RequestOptions.Headers.Set("Accept-Language", "en-US,en;q=0.5")
-
-	// Determine default log file
-	logFile := ""
-	if homeDir, err := os.UserHomeDir(); err == nil {
-		logDir := filepath.Join(homeDir, ".luminary", "logs")
-		if err := os.MkdirAll(logDir, 0755); err == nil {
-			logFile = filepath.Join(logDir, "luminary.log")
-		}
-	}
-
-	// Create logger service first so we can use it in other services
-	loggerService := &LoggerService{
-		Verbose: false,
-		LogFile: logFile,
-	}
 
 	// Create download service
 	downloadService := &DownloadService{
@@ -120,12 +128,16 @@ func New() *Engine {
 		Parser: parser,
 	}
 
-	// Create the new services
-	engine.Extractor = NewExtractorService(loggerService)
+	// Create API service with logger
 	engine.API = NewAPIService(httpService, rateLimiterService, loggerService)
+
+	// Create the extractor service with logger
+	engine.Extractor = NewExtractorService(loggerService)
+
+	// Create the pagination service with dependencies
 	engine.Pagination = NewPaginationService(engine.API, engine.Extractor, loggerService)
 
-	// Create the search service with dependencies from other services
+	// Create the search service with dependencies and logger
 	engine.Search = NewSearchService(
 		loggerService,
 		engine.API,
@@ -134,6 +146,7 @@ func New() *Engine {
 		rateLimiterService,
 	)
 
+	loggerService.Info("Engine initialized successfully")
 	return engine
 }
 

@@ -1,6 +1,7 @@
 package engine
 
 import (
+	"Luminary/errors"
 	"context"
 	"fmt"
 	"time"
@@ -15,7 +16,11 @@ func ExecuteInitialize(ctx context.Context, engine *Engine, agentID, agentName s
 	err := initFunc(ctx)
 	if err != nil {
 		engine.Logger.Error("Failed to initialize agent %s: %v", agentID, err)
-		return fmt.Errorf("failed to initialize agent: %w", err)
+		return &errors.AgentError{
+			AgentID: agentID,
+			Message: "Failed to initialize agent",
+			Err:     err,
+		}
 	}
 
 	engine.Logger.Info("Agent initialized: %s", agentID)
@@ -34,8 +39,18 @@ func ExecuteSearch(
 	extractorSet ExtractorSet,
 ) ([]Manga, error) {
 	// Delegate to the search service
-	return engine.Search.ExecuteSearch(
+	results, err := engine.Search.ExecuteSearch(
 		ctx, agentID, query, options, apiConfig, paginationConfig, extractorSet)
+
+	if err != nil {
+		return nil, &errors.AgentError{
+			AgentID: agentID,
+			Message: fmt.Sprintf("Search failed for query '%s'", query),
+			Err:     err,
+		}
+	}
+
+	return results, nil
 }
 
 // ExecuteGetManga handles the common pattern for retrieving manga details
@@ -63,20 +78,54 @@ func ExecuteGetManga(
 		nil,
 		mangaID,
 	)
+
 	if err != nil {
-		return nil, fmt.Errorf("failed to fetch manga: %w", err)
+		// Check for not found error specifically
+		if errors.IsNotFound(err) {
+			return nil, errors.NewAgentNotFoundError(agentID, "manga", mangaID, err)
+		}
+
+		// For other errors, wrap with agent context
+		return nil, &errors.AgentError{
+			AgentID:      agentID,
+			ResourceType: "manga",
+			ResourceID:   mangaID,
+			Message:      "Failed to fetch manga",
+			Err:          err,
+		}
 	}
 
 	// Extract manga data
 	result, err := engine.Extractor.Extract(extractorSet, response)
 	if err != nil {
-		return nil, fmt.Errorf("failed to extract manga data: %w", err)
+		return nil, &errors.AgentError{
+			AgentID:      agentID,
+			ResourceType: "manga",
+			ResourceID:   mangaID,
+			Message:      "Failed to extract manga data",
+			Err:          err,
+		}
 	}
 
 	// Convert to MangaInfo
 	mangaInfo, ok := result.(*MangaInfo)
 	if !ok {
-		return nil, fmt.Errorf("expected MangaInfo, got %T", result)
+		return nil, &errors.AgentError{
+			AgentID:      agentID,
+			ResourceType: "manga",
+			ResourceID:   mangaID,
+			Message:      fmt.Sprintf("Expected MangaInfo, got %T", result),
+			Err:          errors.ErrInvalidInput,
+		}
+	}
+
+	// Validate the result
+	if mangaInfo.ID == "" {
+		mangaInfo.ID = mangaID
+	}
+
+	if mangaInfo.Title == "" {
+		engine.Logger.Warn("[%s] Manga with ID %s has no title", agentID, mangaID)
 	}
 
 	// Fetch chapters for this manga
@@ -84,6 +133,7 @@ func ExecuteGetManga(
 	if err != nil {
 		engine.Logger.Warn("[%s] Failed to fetch chapters for manga %s: %v", agentID, mangaID, err)
 		// Continue anyway, just with empty chapters list
+		mangaInfo.Chapters = []ChapterInfo{}
 	} else {
 		mangaInfo.Chapters = chapters
 	}
@@ -116,25 +166,60 @@ func ExecuteGetChapter(
 		nil,
 		chapterID,
 	)
+
 	if err != nil {
-		return nil, fmt.Errorf("failed to fetch chapter: %w", err)
+		// Check for not found error specifically
+		if errors.IsNotFound(err) {
+			return nil, errors.NewAgentNotFoundError(agentID, "chapter", chapterID, err)
+		}
+
+		// For other errors, wrap with agent context
+		return nil, &errors.AgentError{
+			AgentID:      agentID,
+			ResourceType: "chapter",
+			ResourceID:   chapterID,
+			Message:      "Failed to fetch chapter",
+			Err:          err,
+		}
 	}
 
 	// Process the response with agent-specific logic
 	if processFunc != nil {
-		return processFunc(response, chapterID)
+		chapter, err := processFunc(response, chapterID)
+		if err != nil {
+			return nil, &errors.AgentError{
+				AgentID:      agentID,
+				ResourceType: "chapter",
+				ResourceID:   chapterID,
+				Message:      "Failed to process chapter data",
+				Err:          err,
+			}
+		}
+		return chapter, nil
 	}
 
 	// Or use the general extractor if no custom processing
 	result, err := engine.Extractor.Extract(extractorSet, response)
 	if err != nil {
-		return nil, fmt.Errorf("failed to extract chapter data: %w", err)
+		return nil, &errors.AgentError{
+			AgentID:      agentID,
+			ResourceType: "chapter",
+			ResourceID:   chapterID,
+			Message:      "Failed to extract chapter data",
+			Err:          err,
+		}
 	}
 
 	// Convert to Chapter
 	chapter, ok := result.(*Chapter)
 	if !ok {
-		return nil, fmt.Errorf("expected Chapter, got %T", result)
+		return nil, &errors.AgentError{
+			AgentID:      agentID,
+			ResourceType: "chapter",
+			ResourceID:   chapterID,
+			Message:      fmt.Sprintf("Expected Chapter, got %T", result),
+			Err:          errors.ErrInvalidInput,
+		}
 	}
 
 	return chapter, nil
@@ -157,7 +242,13 @@ func ExecuteDownloadChapter(
 	// Get chapter information
 	chapter, err := getChapterFunc(ctx, chapterID)
 	if err != nil {
-		return fmt.Errorf("failed to get chapter info: %w", err)
+		return &errors.AgentError{
+			AgentID:      agentID,
+			ResourceType: "chapter",
+			ResourceID:   chapterID,
+			Message:      "Failed to get chapter info for download",
+			Err:          err,
+		}
 	}
 
 	// Try to get manga info for proper manga title
@@ -188,6 +279,17 @@ func ExecuteDownloadChapter(
 		// Try to extract volume from title if not overridden
 		_, extractedVol := engine.Metadata.ExtractChapterInfo(chapter.Info.Title)
 		volumeNum = extractedVol
+	}
+
+	// Make sure there are pages to download
+	if len(chapter.Pages) == 0 {
+		return &errors.AgentError{
+			AgentID:      agentID,
+			ResourceType: "chapter",
+			ResourceID:   chapterID,
+			Message:      "Chapter has no pages to download",
+			Err:          errors.ErrInvalidInput,
+		}
 	}
 
 	// Prepare metadata
@@ -240,7 +342,13 @@ func ExecuteDownloadChapter(
 	err = engine.Download.DownloadChapter(ctx, config)
 	if err != nil {
 		engine.Logger.Error("[%s] Download failed: %v", agentID, err)
-		return fmt.Errorf("download failed: %w", err)
+		return &errors.AgentError{
+			AgentID:      agentID,
+			ResourceType: "chapter",
+			ResourceID:   chapterID,
+			Message:      "Download failed",
+			Err:          err,
+		}
 	}
 
 	engine.Logger.Info("[%s] Successfully downloaded chapter %s", agentID, chapterID)

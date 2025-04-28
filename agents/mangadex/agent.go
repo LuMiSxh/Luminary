@@ -2,6 +2,7 @@ package mangadex
 
 import (
 	"Luminary/engine"
+	"Luminary/errors"
 	"context"
 	"fmt"
 	"net/url"
@@ -209,7 +210,7 @@ func (m *MangaDex) configureAPIEndpoints() {
 	}
 }
 
-// configureExtractors sets up the data extractors
+// configureExtractors sets up the data extractors with fixed source paths
 func (m *MangaDex) configureExtractors() {
 	// Manga extractor set
 	m.extractorSets["manga"] = engine.ExtractorSet{
@@ -478,32 +479,18 @@ func (m *MangaDex) configureExtractors() {
 	}
 }
 
-// Search implements the engine.Agent interface for searching
-func (m *MangaDex) Search(ctx context.Context, query string, options engine.SearchOptions) ([]engine.Manga, error) {
-	// Use the engine helper with appropriate configuration
-	return engine.ExecuteSearch(
-		ctx,
-		m.engine,
-		m.id,
-		query,
-		&options,
-		m.apiConfig,
-		engine.PaginationConfig{
-			LimitParam:     "limit",
-			OffsetParam:    "offset",
-			TotalCountPath: []string{"Total"},
-			ItemsPath:      []string{"Data"},
-			DefaultLimit:   100,
-			MaxLimit:       100,
-		},
-		m.extractorSets["search"],
-	)
-}
-
-// GetManga implements the engine.Agent interface for retrieving manga details
+// GetManga method implementation with improved error handling
 func (m *MangaDex) GetManga(ctx context.Context, id string) (*engine.MangaInfo, error) {
+	// Validate ID
+	if id == "" {
+		return nil, fmt.Errorf("manga ID cannot be empty")
+	}
+
+	// Log the exact ID being requested for debugging
+	m.engine.Logger.Debug("[MangaDex] Getting manga with ID: %s", id)
+
 	// Use the engine helper with appropriate configuration
-	return engine.ExecuteGetManga(
+	mangaInfo, err := engine.ExecuteGetManga(
 		ctx,
 		m.engine,
 		m.id,
@@ -514,11 +501,33 @@ func (m *MangaDex) GetManga(ctx context.Context, id string) (*engine.MangaInfo, 
 			return m.fetchChaptersForManga(ctx, mangaID)
 		},
 	)
+
+	// Check for errors and provide user-friendly messages
+	if err != nil {
+		var notFoundErr *errors.AgentError
+		if errors.As(err, &notFoundErr) && errors.IsNotFound(err) {
+			m.engine.Logger.Warn("[%s] Manga not found: %s", m.id, id)
+			return nil, fmt.Errorf("manga with ID '%s' not found on MangaDex", id)
+		}
+
+		m.engine.Logger.Error("[%s] Error fetching manga %s: %v", m.id, id, err)
+		return nil, err
+	}
+
+	// Verify we got valid manga data
+	if mangaInfo == nil || mangaInfo.Title == "" {
+		m.engine.Logger.Warn("[%s] Retrieved empty or invalid manga data for ID %s", m.id, id)
+		return nil, fmt.Errorf("retrieved incomplete manga data")
+	}
+
+	m.engine.Logger.Info("[%s] Successfully retrieved manga: %s (%s)", m.id, mangaInfo.Title, id)
+	return mangaInfo, nil
 }
 
-// fetchChaptersForManga fetches all chapters for a manga
-// This implements the paginated approach similar to HakuNeko's _getChapters function
+// fetchChaptersForManga with improved error handling
 func (m *MangaDex) fetchChaptersForManga(ctx context.Context, mangaID string) ([]engine.ChapterInfo, error) {
+	m.engine.Logger.Info("[%s] Fetching chapters for manga: %s", m.id, mangaID)
+
 	var allChapters []engine.ChapterInfo
 
 	// We'll implement paginated fetching to get all chapters
@@ -532,6 +541,9 @@ func (m *MangaDex) fetchChaptersForManga(ctx context.Context, mangaID string) ([
 			Limit:  100,
 		}
 
+		m.engine.Logger.Debug("[%s] Fetching chapters page %d (offset %d) for manga %s",
+			m.id, page+1, params.Offset, mangaID)
+
 		// Fetch a page of chapters
 		response, err := m.engine.API.FetchFromAPI(
 			ctx,
@@ -542,13 +554,23 @@ func (m *MangaDex) fetchChaptersForManga(ctx context.Context, mangaID string) ([
 		)
 
 		if err != nil {
-			return nil, fmt.Errorf("failed to fetch chapters: %w", err)
+			// Handle not found errors specially
+			if errors.IsNotFound(err) {
+				// If this is the first page, it's an error
+				if page == 0 {
+					return nil, fmt.Errorf("no chapters found for manga %s", mangaID)
+				}
+				// Otherwise, we've probably just reached the end of available pages
+				break
+			}
+
+			return nil, fmt.Errorf("failed to fetch chapters (page %d): %w", page+1, err)
 		}
 
 		// Cast to expected response type
 		chaptersResp, ok := response.(*ChapterListResponse)
 		if !ok {
-			return nil, fmt.Errorf("unexpected response type: %T", response)
+			return nil, fmt.Errorf("unexpected response type for chapters: %T", response)
 		}
 
 		// If we didn't get any data, break out of the loop
@@ -601,7 +623,30 @@ func (m *MangaDex) fetchChaptersForManga(ctx context.Context, mangaID string) ([
 		}
 	}
 
+	m.engine.Logger.Info("[%s] Retrieved %d chapters for manga %s", m.id, len(allChapters), mangaID)
 	return allChapters, nil
+}
+
+// Search implements the engine.Agent interface for searching
+func (m *MangaDex) Search(ctx context.Context, query string, options engine.SearchOptions) ([]engine.Manga, error) {
+	// Use the engine helper with appropriate configuration
+	return engine.ExecuteSearch(
+		ctx,
+		m.engine,
+		m.id,
+		query,
+		&options,
+		m.apiConfig,
+		engine.PaginationConfig{
+			LimitParam:     "limit",
+			OffsetParam:    "offset",
+			TotalCountPath: []string{"Total"},
+			ItemsPath:      []string{"Data"},
+			DefaultLimit:   100,
+			MaxLimit:       100,
+		},
+		m.extractorSets["search"],
+	)
 }
 
 // GetChapter implements the engine.Agent interface for retrieving chapter details

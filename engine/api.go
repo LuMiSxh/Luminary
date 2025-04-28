@@ -1,11 +1,13 @@
 package engine
 
 import (
+	"Luminary/errors"
 	"context"
 	"encoding/json"
 	"fmt"
 	"net/http"
 	"net/url"
+	"reflect"
 	"strings"
 	"time"
 )
@@ -46,7 +48,7 @@ func NewAPIService(http *HTTPService, rateLimiter *RateLimiterService, logger *L
 	}
 }
 
-// FetchFromAPI fetches data from an API endpoint
+// FetchFromAPI fetches data from an API endpoint with improved error handling
 func (a *APIService) FetchFromAPI(
 	ctx context.Context,
 	config APIConfig,
@@ -56,7 +58,11 @@ func (a *APIService) FetchFromAPI(
 ) (interface{}, error) {
 	endpoint, exists := config.Endpoints[endpointName]
 	if !exists {
-		return nil, fmt.Errorf("endpoint not found: %s", endpointName)
+		return nil, &errors.APIError{
+			Endpoint: endpointName,
+			Message:  "Endpoint not found",
+			Err:      errors.ErrInvalidInput,
+		}
 	}
 
 	// Format the path with provided parameters
@@ -72,8 +78,17 @@ func (a *APIService) FetchFromAPI(
 	fullURL := fmt.Sprintf("%s%s", config.BaseURL, path)
 
 	// Apply query parameters if provided
-	if params != nil && endpoint.QueryFormatter != nil {
-		queryParams := endpoint.QueryFormatter(params)
+	if params != nil {
+		var queryParams url.Values
+
+		// Use endpoint's QueryFormatter if available, otherwise fall back to BuildQueryParams
+		if endpoint.QueryFormatter != nil {
+			queryParams = endpoint.QueryFormatter(params)
+		} else {
+			// Use our generic reflection-based function as a fallback
+			queryParams = BuildQueryParams(params)
+		}
+
 		if len(queryParams) > 0 {
 			fullURL = fmt.Sprintf("%s?%s", fullURL, queryParams.Encode())
 		}
@@ -89,72 +104,190 @@ func (a *APIService) FetchFromAPI(
 	}
 	headers.Set("Accept", "application/json")
 
-	// Make the request
+	// Create a new instance of the response type
 	var responseData interface{}
 	if endpoint.ResponseType != nil {
-		// Create a new instance of the response type
-		responseData = endpoint.ResponseType
+		// Create a new instance of the response type based on the endpoint config
+		responseType := reflect.TypeOf(endpoint.ResponseType)
+
+		// Ensure we're creating a proper pointer instance
+		if responseType.Kind() == reflect.Ptr {
+			// Create a new instance of the pointed-to type
+			responseData = reflect.New(responseType.Elem()).Interface()
+		} else {
+			// If it's not a pointer type, create a pointer to this type
+			responseData = reflect.New(responseType).Interface()
+		}
+	} else {
+		// If no response type specified, use a map to store generic JSON
+		responseData = &map[string]interface{}{}
 	}
 
-	// Perform the request with retries
-	retryCount := config.RetryCount
-	if retryCount <= 0 {
-		retryCount = 3 // Default retry count
-	}
+	// Log request details at debug level
+	a.Logger.Debug("[API] Requesting: %s %s", endpoint.Method, fullURL)
 
-	var lastErr error
-	for attempt := 0; attempt <= retryCount; attempt++ {
-		if attempt > 0 {
-			a.Logger.Debug("Retrying request (%d/%d): %s", attempt, retryCount, fullURL)
-			select {
-			case <-ctx.Done():
-				return nil, ctx.Err()
-			case <-time.After(time.Duration(attempt) * time.Second):
-				// Exponential backoff
+	// Make the HTTP request and handle errors
+	err := a.HTTP.FetchJSON(ctx, fullURL, responseData, headers)
+	if err != nil {
+		// Check for specific error types and enhance them with API context
+		if errors.IsNotFound(err) {
+			// Extract resource details
+			resourceType := ""
+			resourceID := ""
+
+			// Try to determine from the URL path
+			pathParts := strings.Split(strings.Trim(path, "/"), "/")
+			if len(pathParts) > 0 {
+				resourceType = pathParts[0]
+
+				// Try to get the resource ID
+				if len(pathParams) > 0 {
+					resourceID = pathParams[0]
+				}
+			}
+
+			return nil, &errors.ResourceNotFoundError{
+				APIError: errors.APIError{
+					Endpoint: endpointName,
+					URL:      fullURL,
+					Message:  fmt.Sprintf("%s not found", resourceType),
+					Err:      err,
+				},
+				ResourceType: resourceType,
+				ResourceID:   resourceID,
 			}
 		}
 
-		a.Logger.Debug("Making request to: %s", fullURL)
-
-		var err error
-		if responseData != nil {
-			err = a.HTTP.FetchJSON(ctx, fullURL, responseData, headers)
-		} else {
-			var genericResponse map[string]interface{}
-			err = a.HTTP.FetchJSON(ctx, fullURL, &genericResponse, headers)
-			responseData = genericResponse
+		// For other errors, wrap them with API context
+		var apiErr = &errors.APIError{
+			Endpoint: endpointName,
+			URL:      fullURL,
+			Message:  "API request failed",
+			Err:      err,
 		}
 
-		if err == nil {
-			break
+		// Try to extract status code if it's an HTTP error
+		var httpErr *errors.HTTPError
+		if errors.As(err, &httpErr) {
+			apiErr.StatusCode = httpErr.StatusCode
+			apiErr.Message = httpErr.Message
 		}
 
-		lastErr = err
-		if attempt == retryCount {
-			return nil, fmt.Errorf("API request failed after %d attempts: %w", retryCount+1, lastErr)
-		}
+		return nil, apiErr
 	}
 
+	a.Logger.Debug("[API] Request successful: %s", fullURL)
 	return responseData, nil
 }
 
-// BuildQueryParams converts a search options struct to URL query parameters
+// BuildQueryParams converts a struct to URL query parameters using reflection
 func BuildQueryParams(options interface{}) url.Values {
 	params := url.Values{}
 
-	// Use reflection to extract fields from the options struct
-	// For simplicity, we'll just handle common options manually
+	// If options is nil, return empty params
+	if options == nil {
+		return params
+	}
 
-	// This could be improved with reflection for a more generic approach
-	switch opts := options.(type) {
-	case SearchOptions:
-		if opts.Limit > 0 {
-			params.Set("limit", fmt.Sprintf("%d", opts.Limit))
+	// Get the value of the options
+	v := reflect.ValueOf(options)
+
+	// If it's a pointer, dereference it
+	if v.Kind() == reflect.Ptr {
+		if v.IsNil() {
+			return params
 		}
-		if opts.Sort != "" {
-			params.Set("sort", opts.Sort)
+		v = v.Elem()
+	}
+
+	// Ensure we're dealing with a struct
+	if v.Kind() != reflect.Struct {
+		return params
+	}
+
+	// Get the type of the struct
+	t := v.Type()
+
+	// Iterate through all fields of the struct
+	for i := 0; i < t.NumField(); i++ {
+		field := t.Field(i)
+		fieldValue := v.Field(i)
+
+		// Skip unexported fields
+		if field.PkgPath != "" { // This is how you check if a field is exported in Go
+			continue
 		}
-		// Add other fields as needed
+
+		// Get the param name from the json tag or use the field name
+		paramName := field.Name
+		if jsonTag := field.Tag.Get("json"); jsonTag != "" {
+			parts := strings.Split(jsonTag, ",")
+			if parts[0] != "-" {
+				paramName = parts[0]
+			}
+		}
+
+		// Convert the field value to a query parameter based on its type
+		switch fieldValue.Kind() {
+		case reflect.String:
+			val := fieldValue.String()
+			if val != "" {
+				params.Set(paramName, val)
+			}
+
+		case reflect.Int, reflect.Int8, reflect.Int16, reflect.Int32, reflect.Int64:
+			val := fieldValue.Int()
+			if val != 0 {
+				params.Set(paramName, fmt.Sprintf("%d", val))
+			}
+
+		case reflect.Uint, reflect.Uint8, reflect.Uint16, reflect.Uint32, reflect.Uint64:
+			val := fieldValue.Uint()
+			if val != 0 {
+				params.Set(paramName, fmt.Sprintf("%d", val))
+			}
+
+		case reflect.Float32, reflect.Float64:
+			val := fieldValue.Float()
+			if val != 0 {
+				params.Set(paramName, fmt.Sprintf("%g", val))
+			}
+
+		case reflect.Bool:
+			val := fieldValue.Bool()
+			params.Set(paramName, fmt.Sprintf("%t", val))
+
+		case reflect.Slice:
+			// Handle string slices
+			if fieldValue.Len() > 0 {
+				if fieldValue.Type().Elem().Kind() == reflect.String {
+					for j := 0; j < fieldValue.Len(); j++ {
+						val := fieldValue.Index(j).String()
+						if val != "" {
+							params.Add(paramName+"[]", val)
+						}
+					}
+				}
+			}
+
+		case reflect.Map:
+			// Handle map[string]string for filters
+			if fieldValue.Len() > 0 {
+				if fieldValue.Type().Key().Kind() == reflect.String &&
+					fieldValue.Type().Elem().Kind() == reflect.String {
+					iter := fieldValue.MapRange()
+					for iter.Next() {
+						key := iter.Key().String()
+						val := iter.Value().String()
+						if key != "" && val != "" {
+							params.Set(key, val)
+						}
+					}
+				}
+			}
+		default:
+			panic("unhandled default case")
+		}
 	}
 
 	return params
