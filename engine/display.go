@@ -3,11 +3,11 @@ package engine
 import (
 	"Luminary/utils"
 	"fmt"
+	"sort"
 	"strings"
-	"time"
 )
 
-// DisplayLevel defines the level of detail for displaying manga information
+// DisplayLevel defines the level of detail for displaying information
 type DisplayLevel int
 
 const (
@@ -128,73 +128,21 @@ func DisplayManga(manga Manga, agent Agent, options DisplayOptions) string {
 	return output.String()
 }
 
-// DisplayMangaInfo formats and prints detailed manga information including chapters
-func DisplayMangaInfo(manga *MangaInfo, agent Agent) string {
+// DisplayChapter formats and prints chapter information according to the specified options
+func DisplayChapter(chapter ChapterInfo, agentID string, options DisplayOptions) string {
 	var output strings.Builder
 
-	// Create options for displaying the manga base information
-	options := DisplayOptions{
-		Level:            DisplayDetailed,
-		IncludeAltTitles: true,
-		ShowTags:         true,
-		TagLimit:         0, // No limit
-		Indent:           "",
-		Prefix:           "",
-	}
+	// Format the chapter ID
+	chapterID := utils.FormatMangaID(agentID, chapter.ID)
 
-	// Format the manga ID
-	mangaID := utils.FormatMangaID(agent.ID(), manga.ID)
+	// Apply indentation and prefix to each line
+	indent := options.Indent
+	prefix := options.Prefix
 
-	// Convert MangaInfo to Manga for basic display
-	baseManga := Manga{
-		ID:          manga.ID,
-		Title:       manga.Title,
-		Cover:       manga.Cover,
-		Description: manga.Description,
-		Authors:     manga.Authors,
-		Status:      manga.Status,
-		Tags:        manga.Tags,
-		AltTitles:   manga.AltTitles,
-	}
-
-	// Display basic manga information with consistent formatting
-	baseInfo := DisplayManga(baseManga, agent, options)
-
-	// Replace the default "Title (ID: xxx)" format with our preferred format for the info command
-	// First, extract the title line which ends with the first newline
-	titleLine := baseInfo[:strings.Index(baseInfo, "\n")+1]
-
-	// Remove the title line from baseInfo
-	baseInfo = baseInfo[len(titleLine):]
-
-	// Add our custom title format
-	output.WriteString(fmt.Sprintf("Manga: %s\n", manga.Title))
-	output.WriteString(fmt.Sprintf("ID: %s\n", mangaID))
-
-	// Add the rest of the base info
-	output.WriteString(baseInfo)
-
-	// Chapters
-	if len(manga.Chapters) > 0 {
-		output.WriteString(fmt.Sprintf("\nChapters (%d):\n", len(manga.Chapters)))
-
-		// Sort chapters by number if needed
-		// For now, we'll assume they're already sorted
-
-		for _, chapter := range manga.Chapters {
-			output.WriteString(DisplayChapter(chapter, agent.ID(), "- "))
-		}
-	}
-
-	return output.String()
-}
-
-// DisplayChapter formats and prints chapter information
-func DisplayChapter(chapter ChapterInfo, agentID string, prefix string) string {
 	// Format date
 	dateStr := "Unknown date"
 	if !chapter.Date.IsZero() {
-		dateStr = chapter.Date.Format("2006-01-02")
+		dateStr = utils.FormatDate(chapter.Date)
 	}
 
 	// Format chapter number
@@ -203,15 +151,91 @@ func DisplayChapter(chapter ChapterInfo, agentID string, prefix string) string {
 		chapterNum = fmt.Sprintf("%g", chapter.Number)
 	}
 
-	// Format chapter ID
-	chapterID := utils.FormatMangaID(agentID, chapter.ID)
+	// Title and ID (always shown)
+	output.WriteString(fmt.Sprintf("%s%s%s (ID: %s)\n", prefix, indent, chapter.Title, chapterID))
 
-	return fmt.Sprintf("%s%s: %s (Chapter %s, %s)\n",
-		prefix,
-		chapterID,
-		chapter.Title,
-		chapterNum,
-		dateStr)
+	// Chapter number and date (always shown for chapters)
+	output.WriteString(fmt.Sprintf("%s%s%sChapter %s, Released: %s\n", prefix, indent, indent, chapterNum, dateStr))
+
+	return output.String()
+}
+
+// DisplayMangaInfo formats and prints detailed manga information including chapters
+func DisplayMangaInfo(manga *MangaInfo, agent Agent) string {
+	var output strings.Builder
+
+	// Format the manga ID
+	mangaID := utils.FormatMangaID(agent.ID(), manga.ID)
+
+	// Title and ID (always shown first for better readability)
+	output.WriteString(fmt.Sprintf("Manga: %s\n", manga.Title))
+	output.WriteString(fmt.Sprintf("ID: %s\n", mangaID))
+
+	// Authors
+	if len(manga.Authors) > 0 {
+		output.WriteString(fmt.Sprintf("Authors: %s\n", strings.Join(manga.Authors, ", ")))
+	}
+
+	// Status
+	if manga.Status != "" {
+		output.WriteString(fmt.Sprintf("Status: %s\n", manga.Status))
+	}
+
+	// Alternative titles
+	if len(manga.AltTitles) > 0 {
+		output.WriteString(fmt.Sprintf("Also known as: %s\n", strings.Join(manga.AltTitles, ", ")))
+	}
+
+	// Tags
+	if len(manga.Tags) > 0 {
+		output.WriteString(fmt.Sprintf("Tags: %s\n", strings.Join(manga.Tags, ", ")))
+	}
+
+	// Description
+	if manga.Description != "" {
+		output.WriteString(fmt.Sprintf("\nDescription:\n%s\n", manga.Description))
+	}
+
+	// Chapters
+	if len(manga.Chapters) > 0 {
+		output.WriteString(fmt.Sprintf("\nChapters (%d):\n", len(manga.Chapters)))
+
+		// Sort chapters by number if possible
+		sortedChapters := make([]ChapterInfo, len(manga.Chapters))
+		copy(sortedChapters, manga.Chapters)
+
+		sort.SliceStable(sortedChapters, func(i, j int) bool {
+			// If both have valid numbers, sort by number
+			if sortedChapters[i].Number > 0 && sortedChapters[j].Number > 0 {
+				return sortedChapters[i].Number < sortedChapters[j].Number
+			}
+			// If only one has a number, the one with number comes first
+			if sortedChapters[i].Number > 0 {
+				return true
+			}
+			if sortedChapters[j].Number > 0 {
+				return false
+			}
+			// If neither has a number, sort by title
+			return sortedChapters[i].Title < sortedChapters[j].Title
+		})
+
+		// Set options for displaying chapters
+		chapterOptions := DisplayOptions{
+			Level:  DisplayMinimal,
+			Indent: "  ",
+			Prefix: "- ",
+		}
+
+		for _, chapter := range sortedChapters {
+			chapterDisplay := DisplayChapter(chapter, agent.ID(), chapterOptions)
+			output.WriteString(chapterDisplay)
+		}
+	} else {
+		output.WriteString("\nNo chapters available.\n")
+	}
+
+	return output.String()
 }
 
 // DisplaySearchResults formats and prints search results
@@ -266,12 +290,32 @@ func DisplayMangaList(mangas []Manga, agent Agent) string {
 	return output.String()
 }
 
-// FormatDate formats a time.Time value for display
-func FormatDate(date time.Time) string {
-	if date.IsZero() {
-		return "Unknown"
+// DisplayChapterList formats and prints a list of chapters
+func DisplayChapterList(chapters []ChapterInfo, agentID string) string {
+	var output strings.Builder
+
+	if len(chapters) == 0 {
+		output.WriteString("  No chapters found\n")
+		return output.String()
 	}
-	return date.Format("2006-01-02")
+
+	output.WriteString(fmt.Sprintf("  Found %d chapters:\n", len(chapters)))
+
+	// Use minimal display options for lists
+	options := DisplayOptions{
+		Level:  DisplayMinimal,
+		Indent: "",
+		Prefix: "  ",
+	}
+
+	for i, chapter := range chapters {
+		output.WriteString(fmt.Sprintf("  %d. ", i+1))
+		// Remove the leading spaces that DisplayChapter adds to compensate for our numbering
+		chapterOutput := DisplayChapter(chapter, agentID, options)
+		output.WriteString(strings.TrimPrefix(chapterOutput, "    "))
+	}
+
+	return output.String()
 }
 
 // Min returns the smaller of two integers (helper function)

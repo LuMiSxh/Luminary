@@ -1,6 +1,7 @@
-package engine
+package common
 
 import (
+	"Luminary/engine"
 	"Luminary/errors"
 	"context"
 	"fmt"
@@ -8,14 +9,14 @@ import (
 )
 
 // ExecuteInitialize handles common agent initialization logic
-func ExecuteInitialize(ctx context.Context, engine *Engine, agentID, agentName string, initFunc func(context.Context) error) error {
+func ExecuteInitialize(ctx context.Context, e *engine.Engine, agentID, agentName string, initFunc func(context.Context) error) error {
 	// Log initialization
-	engine.Logger.Info("Initializing agent: %s (%s)", agentName, agentID)
+	e.Logger.Info("Initializing agent: %s (%s)", agentName, agentID)
 
 	// Call the agent-specific initialization
 	err := initFunc(ctx)
 	if err != nil {
-		engine.Logger.Error("Failed to initialize agent %s: %v", agentID, err)
+		e.Logger.Error("Failed to initialize agent %s: %v", agentID, err)
 		return &errors.AgentError{
 			AgentID: agentID,
 			Message: "Failed to initialize agent",
@@ -23,23 +24,23 @@ func ExecuteInitialize(ctx context.Context, engine *Engine, agentID, agentName s
 		}
 	}
 
-	engine.Logger.Info("Agent initialized: %s", agentID)
+	e.Logger.Info("Agent initialized: %s", agentID)
 	return nil
 }
 
 // ExecuteSearch handles the common pattern for searching by delegating to the SearchService
 func ExecuteSearch(
 	ctx context.Context,
-	engine *Engine,
+	e *engine.Engine,
 	agentID string,
 	query string,
-	options *SearchOptions,
-	apiConfig APIConfig,
-	paginationConfig PaginationConfig,
-	extractorSet ExtractorSet,
-) ([]Manga, error) {
+	options *engine.SearchOptions,
+	apiConfig engine.APIConfig,
+	paginationConfig engine.PaginationConfig,
+	extractorSet engine.ExtractorSet,
+) ([]engine.Manga, error) {
 	// Delegate to the search service
-	results, err := engine.Search.ExecuteSearch(
+	results, err := e.Search.ExecuteSearch(
 		ctx, agentID, query, options, apiConfig, paginationConfig, extractorSet)
 
 	if err != nil {
@@ -56,22 +57,22 @@ func ExecuteSearch(
 // ExecuteGetManga handles the common pattern for retrieving manga details
 func ExecuteGetManga(
 	ctx context.Context,
-	engine *Engine,
+	e *engine.Engine,
 	agentID string,
 	mangaID string,
-	apiConfig APIConfig,
-	extractorSet ExtractorSet,
-	fetchChaptersFunc func(context.Context, string) ([]ChapterInfo, error),
-) (*MangaInfo, error) {
+	apiConfig engine.APIConfig,
+	extractorSet engine.ExtractorSet,
+	fetchChaptersFunc func(context.Context, string) ([]engine.ChapterInfo, error),
+) (*engine.MangaInfo, error) {
 	// Log manga retrieval
-	engine.Logger.Info("[%s] Fetching manga details for: %s", agentID, mangaID)
+	e.Logger.Info("[%s] Fetching manga details for: %s", agentID, mangaID)
 
 	// Apply rate limiting
-	domain := extractDomainFromUrl(apiConfig.BaseURL)
-	engine.RateLimiter.Wait(domain)
+	domain := e.ExtractDomain(apiConfig.BaseURL)
+	e.RateLimiter.Wait(domain)
 
 	// Fetch manga details using API service
-	response, err := engine.API.FetchFromAPI(
+	response, err := e.API.FetchFromAPI(
 		ctx,
 		apiConfig,
 		"manga",
@@ -96,7 +97,7 @@ func ExecuteGetManga(
 	}
 
 	// Extract manga data
-	result, err := engine.Extractor.Extract(extractorSet, response)
+	result, err := e.Extractor.Extract(extractorSet, response)
 	if err != nil {
 		return nil, &errors.AgentError{
 			AgentID:      agentID,
@@ -108,7 +109,7 @@ func ExecuteGetManga(
 	}
 
 	// Convert to MangaInfo
-	mangaInfo, ok := result.(*MangaInfo)
+	mangaInfo, ok := result.(*engine.MangaInfo)
 	if !ok {
 		return nil, &errors.AgentError{
 			AgentID:      agentID,
@@ -125,15 +126,15 @@ func ExecuteGetManga(
 	}
 
 	if mangaInfo.Title == "" {
-		engine.Logger.Warn("[%s] Manga with ID %s has no title", agentID, mangaID)
+		e.Logger.Warn("[%s] Manga with ID %s has no title", agentID, mangaID)
 	}
 
 	// Fetch chapters for this manga
 	chapters, err := fetchChaptersFunc(ctx, mangaID)
 	if err != nil {
-		engine.Logger.Warn("[%s] Failed to fetch chapters for manga %s: %v", agentID, mangaID, err)
+		e.Logger.Warn("[%s] Failed to fetch chapters for manga %s: %v", agentID, mangaID, err)
 		// Continue anyway, just with empty chapters list
-		mangaInfo.Chapters = []ChapterInfo{}
+		mangaInfo.Chapters = []engine.ChapterInfo{}
 	} else {
 		mangaInfo.Chapters = chapters
 	}
@@ -144,22 +145,22 @@ func ExecuteGetManga(
 // ExecuteGetChapter handles the common pattern for retrieving chapter details
 func ExecuteGetChapter(
 	ctx context.Context,
-	engine *Engine,
+	e *engine.Engine,
 	agentID string,
 	chapterID string,
-	apiConfig APIConfig,
-	extractorSet ExtractorSet,
-	processFunc func(interface{}, string) (*Chapter, error),
-) (*Chapter, error) {
+	apiConfig engine.APIConfig,
+	extractorSet engine.ExtractorSet,
+	processFunc func(interface{}, string) (*engine.Chapter, error),
+) (*engine.Chapter, error) {
 	// Log chapter retrieval
-	engine.Logger.Info("[%s] Fetching chapter details for: %s", agentID, chapterID)
+	e.Logger.Info("[%s] Fetching chapter details for: %s", agentID, chapterID)
 
 	// Apply rate limiting
-	domain := extractDomainFromUrl(apiConfig.BaseURL)
-	engine.RateLimiter.Wait(domain)
+	domain := e.ExtractDomain(apiConfig.BaseURL)
+	e.RateLimiter.Wait(domain)
 
 	// Fetch chapter details using API service
-	response, err := engine.API.FetchFromAPI(
+	response, err := e.API.FetchFromAPI(
 		ctx,
 		apiConfig,
 		"chapter",
@@ -199,7 +200,7 @@ func ExecuteGetChapter(
 	}
 
 	// Or use the general extractor if no custom processing
-	result, err := engine.Extractor.Extract(extractorSet, response)
+	result, err := e.Extractor.Extract(extractorSet, response)
 	if err != nil {
 		return nil, &errors.AgentError{
 			AgentID:      agentID,
@@ -211,7 +212,7 @@ func ExecuteGetChapter(
 	}
 
 	// Convert to Chapter
-	chapter, ok := result.(*Chapter)
+	chapter, ok := result.(*engine.Chapter)
 	if !ok {
 		return nil, &errors.AgentError{
 			AgentID:      agentID,
@@ -228,16 +229,16 @@ func ExecuteGetChapter(
 // ExecuteDownloadChapter handles the common pattern for downloading a chapter
 func ExecuteDownloadChapter(
 	ctx context.Context,
-	engine *Engine,
+	e *engine.Engine,
 	agentID string,
 	agentName string,
 	chapterID string,
 	destDir string,
-	getChapterFunc func(context.Context, string) (*Chapter, error),
-	getMangaForChapterFunc func(context.Context, string) (*Manga, error),
+	getChapterFunc func(context.Context, string) (*engine.Chapter, error),
+	getMangaForChapterFunc func(context.Context, string) (*engine.Manga, error),
 ) error {
 	// Log download request
-	engine.Logger.Info("[%s] Downloading chapter: %s to %s", agentID, chapterID, destDir)
+	e.Logger.Info("[%s] Downloading chapter: %s to %s", agentID, chapterID, destDir)
 
 	// Get chapter information
 	chapter, err := getChapterFunc(ctx, chapterID)
@@ -261,7 +262,7 @@ func ExecuteDownloadChapter(
 		mangaID = manga.ID
 	} else {
 		// Fall back to using chapter title
-		engine.Logger.Debug("[%s] Couldn't find manga for chapter %s, using fallback title", agentID, chapterID)
+		e.Logger.Debug("[%s] Couldn't find manga for chapter %s, using fallback title", agentID, chapterID)
 		mangaTitle = fmt.Sprintf("%s-%s", agentName, chapterID)
 	}
 
@@ -273,11 +274,11 @@ func ExecuteDownloadChapter(
 
 	// Check for volume override in context
 	var volumeNum *int
-	if vol, hasOverride := GetVolumeOverride(ctx); hasOverride {
+	if vol, hasOverride := engine.GetVolumeOverride(ctx); hasOverride {
 		volumeNum = &vol
 	} else if chapter.Info.Title != "" {
 		// Try to extract volume from title if not overridden
-		_, extractedVol := engine.Metadata.ExtractChapterInfo(chapter.Info.Title)
+		_, extractedVol := e.Metadata.ExtractChapterInfo(chapter.Info.Title)
 		volumeNum = extractedVol
 	}
 
@@ -293,7 +294,7 @@ func ExecuteDownloadChapter(
 	}
 
 	// Prepare metadata
-	metadata := ChapterMetadata{
+	metadata := engine.ChapterMetadata{
 		MangaID:      mangaID,
 		MangaTitle:   mangaTitle,
 		ChapterID:    chapterID,
@@ -304,9 +305,9 @@ func ExecuteDownloadChapter(
 	}
 
 	// Convert pages to download requests
-	downloadFiles := make([]DownloadRequest, len(chapter.Pages))
+	downloadFiles := make([]engine.DownloadRequest, len(chapter.Pages))
 	for i, page := range chapter.Pages {
-		downloadFiles[i] = DownloadRequest{
+		downloadFiles[i] = engine.DownloadRequest{
 			URL:       page.URL,
 			Index:     i + 1,
 			Filename:  page.Filename,
@@ -315,33 +316,33 @@ func ExecuteDownloadChapter(
 	}
 
 	// Extract concurrency settings from context or use default
-	concurrency := engine.Download.MaxConcurrency
-	if contextConcurrency := GetConcurrency(ctx, concurrency); contextConcurrency > 0 {
+	concurrency := e.Download.MaxConcurrency
+	if contextConcurrency := engine.GetConcurrency(ctx, concurrency); contextConcurrency > 0 {
 		concurrency = contextConcurrency
 	}
 
 	// Set up download configuration
-	config := DownloadJobConfig{
+	config := engine.DownloadJobConfig{
 		Metadata:    metadata,
 		OutputDir:   destDir,
 		Concurrency: concurrency,
 		Files:       downloadFiles,
 		WaitDuration: func(isRetry bool) {
 			if isRetry {
-				time.Sleep(engine.HTTP.ThrottleTimeAPI)
+				time.Sleep(e.HTTP.ThrottleTimeAPI)
 			} else {
-				time.Sleep(engine.HTTP.ThrottleTimeImages)
+				time.Sleep(e.HTTP.ThrottleTimeImages)
 			}
 		},
 	}
 
 	// Log and start download
-	engine.Logger.Info("[%s] Downloading %d pages for chapter %s", agentID, len(chapter.Pages), chapterID)
+	e.Logger.Info("[%s] Downloading %d pages for chapter %s", agentID, len(chapter.Pages), chapterID)
 
 	// Use the engine's download service to download the chapter
-	err = engine.Download.DownloadChapter(ctx, config)
+	err = e.Download.DownloadChapter(ctx, config)
 	if err != nil {
-		engine.Logger.Error("[%s] Download failed: %v", agentID, err)
+		e.Logger.Error("[%s] Download failed: %v", agentID, err)
 		return &errors.AgentError{
 			AgentID:      agentID,
 			ResourceType: "chapter",
@@ -351,6 +352,6 @@ func ExecuteDownloadChapter(
 		}
 	}
 
-	engine.Logger.Info("[%s] Successfully downloaded chapter %s", agentID, chapterID)
+	e.Logger.Info("[%s] Successfully downloaded chapter %s", agentID, chapterID)
 	return nil
 }

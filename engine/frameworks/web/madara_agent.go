@@ -1,7 +1,8 @@
-package madara
+package web
 
 import (
 	"Luminary/engine"
+	"Luminary/engine/frameworks/common"
 	"Luminary/errors"
 	"Luminary/utils"
 	"context"
@@ -11,57 +12,18 @@ import (
 	"time"
 )
 
-// Config holds configuration for Madara-based sites
-type Config struct {
-	ID          string            // Short identifier
-	Name        string            // Display name
-	SiteURL     string            // Base URL for the site
-	Description string            // Site description
-	Headers     map[string]string // Additional HTTP headers
-
-	// Selectors for different content types
-	MangaSelector   string // Selector for manga list items
-	ChapterSelector string // Selector for chapter list items
-	PageSelector    string // Selector for page images
-
-	// Custom options
-	UseLegacyAjax    bool   // Use old-style AJAX requests
-	CustomLoadAction string // Custom AJAX action for loading more content
-}
-
-// DefaultConfig returns a default configuration for Madara sites
-func DefaultConfig(id, name, siteURL, description string) Config {
-	return Config{
-		ID:              id,
-		Name:            name,
-		SiteURL:         siteURL,
-		Description:     description,
-		MangaSelector:   "div.post-title h3 a, div.post-title h5 a, div.page-item-detail.manga div.post-title h3 a",
-		ChapterSelector: "li.wp-manga-chapter > a",
-		PageSelector:    "div.page-break source, div.page-break img, .reading-content img",
-		UseLegacyAjax:   false,
-		Headers: map[string]string{
-			"User-Agent":      "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36",
-			"Accept":          "text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.9",
-			"Accept-Language": "en-US,en;q=0.9",
-			"Cache-Control":   "max-age=0",
-			"Connection":      "keep-alive",
-		},
-	}
-}
-
-// Agent implements the engine.Agent interface for Madara-based sites
-type Agent struct {
-	config     Config
+// MadaraAgent implements the engine.Agent interface for Madara-based sites
+type MadaraAgent struct {
+	config     MadaraConfig
+	htmlAgent  *HTMLAgent
 	engine     *engine.Engine
-	htmlAgent  *engine.HTMLAgent
 	webScraper *engine.WebScraperService
 }
 
-// NewAgent creates a new Madara-based agent
-func NewAgent(e *engine.Engine, config Config) engine.Agent {
+// NewMadaraAgent creates a new Madara-based agent
+func NewMadaraAgent(e *engine.Engine, config MadaraConfig) engine.Agent {
 	// Create HTML agent config
-	htmlConfig := engine.HTMLAgentConfig{
+	htmlConfig := HTMLAgentConfig{
 		ID:          config.ID,
 		Name:        config.Name,
 		SiteURL:     config.SiteURL,
@@ -69,43 +31,48 @@ func NewAgent(e *engine.Engine, config Config) engine.Agent {
 		Headers:     config.Headers,
 	}
 
-	htmlAgent := engine.NewHTMLAgent(e, htmlConfig)
+	htmlAgent := NewHTMLAgent(e, htmlConfig)
 
-	return &Agent{
+	return &MadaraAgent{
 		config:     config,
-		engine:     e,
 		htmlAgent:  htmlAgent,
+		engine:     e,
 		webScraper: e.WebScraper,
 	}
 }
 
+// CreateMadaraAgent is a convenience function to create a Madara agent with default configuration
+func CreateMadaraAgent(e *engine.Engine, id, name, siteURL, description string) engine.Agent {
+	return NewMadaraAgent(e, DefaultMadaraConfig(id, name, siteURL, description))
+}
+
 // ID returns the agent's identifier
-func (a *Agent) ID() string {
+func (a *MadaraAgent) ID() string {
 	return a.htmlAgent.ID()
 }
 
 // Name returns the agent's display name
-func (a *Agent) Name() string {
+func (a *MadaraAgent) Name() string {
 	return a.htmlAgent.Name()
 }
 
 // Description returns the agent's description
-func (a *Agent) Description() string {
+func (a *MadaraAgent) Description() string {
 	return a.htmlAgent.Description()
 }
 
 // SiteURL returns the agent's website URL
-func (a *Agent) SiteURL() string {
+func (a *MadaraAgent) SiteURL() string {
 	return a.htmlAgent.SiteURL()
 }
 
 // Initialize initializes the agent
-func (a *Agent) Initialize(ctx context.Context) error {
+func (a *MadaraAgent) Initialize(ctx context.Context) error {
 	return a.htmlAgent.Initialize(ctx)
 }
 
 // FetchMainPage fetches the main page
-func (a *Agent) FetchMainPage(ctx context.Context) (*engine.WebPage, error) {
+func (a *MadaraAgent) FetchMainPage(ctx context.Context) (*engine.WebPage, error) {
 	// Create request for the main page
 	req := engine.NewScraperRequest(a.config.SiteURL)
 	for k, v := range a.config.Headers {
@@ -115,7 +82,7 @@ func (a *Agent) FetchMainPage(ctx context.Context) (*engine.WebPage, error) {
 }
 
 // Search implements manga search for Madara sites
-func (a *Agent) Search(ctx context.Context, query string, options engine.SearchOptions) ([]engine.Manga, error) {
+func (a *MadaraAgent) Search(ctx context.Context, query string, options engine.SearchOptions) ([]engine.Manga, error) {
 	a.engine.Logger.Info("[%s] Searching for: %s", a.ID(), query)
 
 	// Try multiple approaches to find manga
@@ -180,7 +147,7 @@ func (a *Agent) Search(ctx context.Context, query string, options engine.SearchO
 }
 
 // searchWithAjax uses the WordPress AJAX API to search for manga
-func (a *Agent) searchWithAjax(ctx context.Context, query string, options engine.SearchOptions) ([]engine.Manga, error) {
+func (a *MadaraAgent) searchWithAjax(ctx context.Context, query string, options engine.SearchOptions) ([]engine.Manga, error) {
 	// Determine limit
 	limit := options.Limit
 	if limit <= 0 {
@@ -277,7 +244,7 @@ func (a *Agent) searchWithAjax(ctx context.Context, query string, options engine
 }
 
 // GetManga retrieves manga details
-func (a *Agent) GetManga(ctx context.Context, id string) (*engine.MangaInfo, error) {
+func (a *MadaraAgent) GetManga(ctx context.Context, id string) (*engine.MangaInfo, error) {
 	a.engine.Logger.Info("[%s] Getting manga details for: %s", a.ID(), id)
 
 	// Create a basic MangaInfo
@@ -507,7 +474,7 @@ func (a *Agent) GetManga(ctx context.Context, id string) (*engine.MangaInfo, err
 }
 
 // fetchChaptersViaAjax retrieves chapters via AJAX
-func (a *Agent) fetchChaptersViaAjax(ctx context.Context, mangaID, dataID string) ([]engine.ChapterInfo, error) {
+func (a *MadaraAgent) fetchChaptersViaAjax(ctx context.Context, mangaID, dataID string) ([]engine.ChapterInfo, error) {
 	// Try both AJAX methods, starting with the newer one
 
 	// 1. Try the new endpoint (mangaID/ajax/chapters/)
@@ -556,7 +523,7 @@ func (a *Agent) fetchChaptersViaAjax(ctx context.Context, mangaID, dataID string
 }
 
 // extractChaptersFromPage extracts chapter information from a page
-func (a *Agent) extractChaptersFromPage(page *engine.WebPage, mangaID string) []engine.ChapterInfo {
+func (a *MadaraAgent) extractChaptersFromPage(page *engine.WebPage, mangaID string) []engine.ChapterInfo {
 	var chapters []engine.ChapterInfo
 
 	// Try each chapter selector
@@ -610,7 +577,7 @@ func (a *Agent) extractChaptersFromPage(page *engine.WebPage, mangaID string) []
 }
 
 // GetChapter retrieves chapter details
-func (a *Agent) GetChapter(ctx context.Context, chapterID string) (*engine.Chapter, error) {
+func (a *MadaraAgent) GetChapter(ctx context.Context, chapterID string) (*engine.Chapter, error) {
 	a.engine.Logger.Info("[%s] Getting chapter details for: %s", a.ID(), chapterID)
 
 	// Create a basic Chapter
@@ -748,16 +715,11 @@ func (a *Agent) GetChapter(ctx context.Context, chapterID string) (*engine.Chapt
 }
 
 // TryGetMangaForChapter attempts to get manga info for a chapter
-func (a *Agent) TryGetMangaForChapter(ctx context.Context, chapterID string) (*engine.Manga, error) {
+func (a *MadaraAgent) TryGetMangaForChapter(ctx context.Context, chapterID string) (*engine.Manga, error) {
 	// Get the chapter to extract manga ID
 	chapter, err := a.GetChapter(ctx, chapterID)
 	if err != nil {
 		return nil, err
-	}
-
-	for _, page := range chapter.Pages {
-		// Print the URL of the first page
-		println(page.URL)
 	}
 
 	// If manga ID is available in chapter
@@ -774,8 +736,8 @@ func (a *Agent) TryGetMangaForChapter(ctx context.Context, chapterID string) (*e
 }
 
 // DownloadChapter downloads a chapter
-func (a *Agent) DownloadChapter(ctx context.Context, chapterID, destDir string) error {
-	return engine.ExecuteDownloadChapter(
+func (a *MadaraAgent) DownloadChapter(ctx context.Context, chapterID, destDir string) error {
+	return common.ExecuteDownloadChapter(
 		ctx,
 		a.engine,
 		a.ID(),
@@ -785,9 +747,4 @@ func (a *Agent) DownloadChapter(ctx context.Context, chapterID, destDir string) 
 		a.GetChapter,
 		a.TryGetMangaForChapter,
 	)
-}
-
-// NewMadaraAgent is a convenience function to create a Madara agent
-func NewMadaraAgent(e *engine.Engine, id, name, siteURL, description string) engine.Agent {
-	return NewAgent(e, DefaultConfig(id, name, siteURL, description))
 }

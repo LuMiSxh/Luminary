@@ -290,7 +290,7 @@ func displayConsoleResults(results map[string][]engine.Manga, query string, opti
 
 	fmt.Printf("\nTotal results found: %d\n\n", totalCount)
 
-	// Display results for each agent
+	// Display results for each agent using the standardized display functions
 	if len(results) == 1 && searchAgent != "" {
 		// Display results for a single agent
 		for agentID, mangaList := range results {

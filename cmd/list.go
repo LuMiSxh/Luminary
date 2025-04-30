@@ -255,16 +255,9 @@ func calculateListTimeout(limit, pages int, multipleAgents bool) time.Duration {
 
 // Helper function to display a manga list in a user-friendly format
 func displayMangaList(mangas []engine.Manga, agent engine.Agent) {
-	if len(mangas) == 0 {
-		fmt.Println("  No manga found")
-		return
-	}
-
-	for i, manga := range mangas {
-		fmt.Printf("  %d. %s (ID: %s:%s)\n", i+1, manga.Title, agent.ID(), manga.ID)
-	}
-
-	fmt.Printf("\n  Found %d manga titles\n", len(mangas))
+	// Use the standardized engine display function
+	output := engine.DisplayMangaList(mangas, agent)
+	fmt.Print(output)
 }
 
 func init() {

@@ -4,6 +4,7 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
+	"time"
 )
 
 func ParseFloat64(s string) (float64, error) {
@@ -31,4 +32,12 @@ func CleanImageURL(dirtyURL string) string {
 
 	// Remove control characters
 	return regexp.MustCompile(`[\t\n\r]+`).ReplaceAllString(dirtyURL, "")
+}
+
+// FormatDate formats a time.Time value for display
+func FormatDate(date time.Time) string {
+	if date.IsZero() {
+		return "Unknown"
+	}
+	return date.Format("2006-01-02")
 }

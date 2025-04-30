@@ -1,18 +1,15 @@
 package cmd
 
 import (
-	"Luminary/errors" // Add our custom errors package
+	"Luminary/engine"
+	"Luminary/errors"
 	"Luminary/utils"
 	"context"
 	"fmt"
-	"strings"
 	"time"
 
 	"github.com/spf13/cobra"
 )
-
-// Add --debug flag for detailed error information when needed
-var infoDebugMode bool
 
 var infoCmd = &cobra.Command{
 	Use:   "info [agent:manga-id]",
@@ -56,7 +53,7 @@ var infoCmd = &cobra.Command{
 		ctx, cancel := context.WithTimeout(context.Background(), timeoutDuration)
 		defer cancel()
 
-		// Get manga info
+		// Get manga info with all chapters
 		manga, err := agent.GetManga(ctx, mangaID)
 		if err != nil {
 			// Use our handleMangaError helper which handles different error types
@@ -74,6 +71,11 @@ var infoCmd = &cobra.Command{
 			return
 		}
 
+		// Ensure we have chapter information
+		if manga.Chapters == nil {
+			manga.Chapters = []engine.ChapterInfo{} // Ensure it's never nil
+		}
+
 		if apiMode {
 			// Format chapters for API output
 			chapters := make([]map[string]interface{}, len(manga.Chapters))
@@ -88,50 +90,24 @@ var infoCmd = &cobra.Command{
 
 			apiResponse := map[string]interface{}{
 				"manga": map[string]interface{}{
-					"id":          utils.FormatMangaID(agentID, manga.ID),
-					"title":       manga.Title,
-					"agent":       agentID,
-					"agent_name":  agent.Name(),
-					"description": manga.Description,
-					"authors":     manga.Authors,
-					"status":      manga.Status,
-					"tags":        manga.Tags,
-					"chapters":    chapters,
+					"id":            utils.FormatMangaID(agentID, manga.ID),
+					"title":         manga.Title,
+					"agent":         agentID,
+					"agent_name":    agent.Name(),
+					"description":   manga.Description,
+					"authors":       manga.Authors,
+					"status":        manga.Status,
+					"tags":          manga.Tags,
+					"chapters":      chapters,
+					"chapter_count": len(manga.Chapters),
 				},
 			}
 
 			// Output the manga info
 			utils.OutputJSON("success", apiResponse, nil)
 		} else {
-			// Interactive CLI output
-			fmt.Printf("Manga: %s\n", manga.Title)
-			fmt.Printf("ID: %s:%s\n", agentID, mangaID)
-
-			if len(manga.Authors) > 0 {
-				fmt.Printf("Authors: %s\n", strings.Join(manga.Authors, ", "))
-			}
-
-			if manga.Status != "" {
-				fmt.Printf("Status: %s\n", manga.Status)
-			}
-
-			if len(manga.Tags) > 0 {
-				fmt.Printf("Tags: %s\n", strings.Join(manga.Tags, ", "))
-			}
-
-			fmt.Printf("\nDescription:\n%s\n\n", manga.Description)
-
-			// Display chapters
-			fmt.Printf("Chapters (%d):\n", len(manga.Chapters))
-			for _, chapter := range manga.Chapters {
-				// Include the chapter ID in the output with the format: agent:chapterID
-				fmt.Printf("- %s:%s: %s (Chapter %g, %s)\n",
-					agentID,
-					chapter.ID,
-					chapter.Title,
-					chapter.Number,
-					chapter.Date.Format("2006-01-02"))
-			}
+			// Interactive CLI output - use the standardized display function
+			fmt.Print(engine.DisplayMangaInfo(manga, agent))
 		}
 	},
 }
@@ -155,9 +131,6 @@ func handleMangaError(err error, agentID, mangaID, agentName string) {
 			utils.OutputJSON("error", nil, fmt.Errorf("server error from %s: %v", agentName, err))
 		} else {
 			fmt.Printf("Error: Server error from %s. Please try again later.\n", agentName)
-			if infoDebugMode {
-				fmt.Printf("Debug details: %v\n", err)
-			}
 		}
 		return
 	}
@@ -177,20 +150,9 @@ func handleMangaError(err error, agentID, mangaID, agentName string) {
 		utils.OutputJSON("error", nil, err)
 	} else {
 		fmt.Printf("Error retrieving manga: %v\n", err)
-		if infoDebugMode {
-			// Print more detailed error info in debug mode
-			fmt.Println("\nDebug error details:")
-			fmt.Printf("  Agent: %s\n", agentID)
-			fmt.Printf("  Manga ID: %s\n", mangaID)
-			fmt.Printf("  Error type: %T\n", err)
-			fmt.Printf("  Full error: %+v\n", err)
-		}
 	}
 }
 
 func init() {
 	rootCmd.AddCommand(infoCmd)
-
-	// Add debug flag for detailed error information
-	infoCmd.Flags().BoolVar(&infoDebugMode, "debug", false, "Show detailed error information")
 }
