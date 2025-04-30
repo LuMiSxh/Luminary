@@ -10,6 +10,7 @@ import (
 
 var apiMode bool
 var appEngine *engine.Engine
+var version string
 
 var rootCmd = &cobra.Command{
 	Use:   "Luminary",
@@ -18,7 +19,7 @@ var rootCmd = &cobra.Command{
 	PersistentPreRun: func(cmd *cobra.Command, args []string) {
 		// Initialize engine if not already done
 		if appEngine == nil {
-			appEngine = initializeEngine()
+			appEngine = engine.New()
 		}
 	},
 	Run: func(cmd *cobra.Command, args []string) {
@@ -28,23 +29,6 @@ var rootCmd = &cobra.Command{
 			os.Exit(1)
 		}
 	},
-}
-
-// initializeEngine creates and initializes the engine and all agents
-func initializeEngine() *engine.Engine {
-	// Create a new engine instance
-	e := engine.New()
-
-	// Register all available agents
-	// This would typically iterate through all agent packages and call their NewAgent functions
-	// For demonstration, we're using placeholder code
-	// In a real implementation, each agent package would export a NewAgent function
-
-	// Example of registering agents:
-	// mangadex.RegisterAgent(e)
-	// other_agent.RegisterAgent(e)
-
-	return e
 }
 
 func Execute() {

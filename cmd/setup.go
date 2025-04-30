@@ -6,3 +6,9 @@ import "Luminary/engine"
 func SetupEngine(e *engine.Engine) {
 	appEngine = e
 }
+
+// SetupVersion sets the version for all commands
+func SetupVersion(v string) {
+	version = v
+	rootCmd.Version = v
+}

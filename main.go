@@ -7,6 +7,9 @@ import (
 	"Luminary/engine"
 )
 
+// Version is set during build using -ldflags
+var Version = "0.0.0-dev"
+
 // registerAgents registers all available manga source agents with the engine
 func registerAgents(e *engine.Engine) {
 	// Register MangaDex agent
@@ -31,6 +34,9 @@ func main() {
 
 	// Make the engine available to commands
 	cmd.SetupEngine(e)
+
+	// Set the version for the root command
+	cmd.SetupVersion(Version)
 
 	// Execute the root command
 	cmd.Execute()

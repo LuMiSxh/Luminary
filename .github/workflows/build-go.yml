@@ -1,0 +1,137 @@
+name: 'Build and Release'
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Version number (e.g., 1.0.0)'
+        required: true
+        default: '0.1.0'
+
+jobs:
+  build-go:
+    permissions:
+      contents: write
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: 'macos-latest'
+            target: 'darwin-amd64'
+            output_name: 'luminary'
+            binary_path: 'luminary'
+
+          - os: 'macos-latest'
+            target: 'darwin-arm64'
+            output_name: 'luminary'
+            binary_path: 'luminary'
+
+          - os: 'ubuntu-latest'
+            target: 'linux-amd64'
+            output_name: 'luminary'
+            binary_path: 'luminary'
+
+          - os: 'ubuntu-latest'
+            target: 'linux-arm64'
+            output_name: 'luminary'
+            binary_path: 'luminary'
+
+          - os: 'windows-latest'
+            target: 'windows-amd64'
+            output_name: 'luminary.exe'
+            binary_path: 'luminary.exe'
+
+    runs-on: ${{ matrix.os }}
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.24.x'
+          cache: true
+
+      - name: Parse target
+        id: parse-target
+        shell: bash
+        run: |
+          TARGET=${{ matrix.target }}
+          OS=${TARGET%-*}
+          ARCH=${TARGET#*-}
+          echo "os=$OS" >> $GITHUB_OUTPUT
+          echo "arch=$ARCH" >> $GITHUB_OUTPUT
+
+      - name: Build binary
+        env:
+          GOOS: ${{ steps.parse-target.outputs.os }}
+          GOARCH: ${{ steps.parse-target.outputs.arch }}
+        run: |
+          go build -o ${{ matrix.output_name }} -ldflags "-X main.Version=${{ github.event.inputs.version }}" -v ./...
+
+      - name: Create release archive for Linux/macOS
+        if: ${{ steps.parse-target.outputs.os != 'windows' }}
+        run: |
+          mkdir -p release
+          cp ${{ matrix.binary_path }} release/
+          cp README.md release/
+          cd release
+          tar -czf ../luminary-${{ github.event.inputs.version }}-${{ matrix.target }}.tar.gz *
+          cd ..
+
+      - name: Create release archive for Windows
+        if: ${{ steps.parse-target.outputs.os == 'windows' }}
+        run: |
+          mkdir -p release
+          cp ${{ matrix.binary_path }} release/
+          cp README.md release/
+          cd release
+          7z a -tzip ../luminary-${{ github.event.inputs.version }}-${{ matrix.target }}.zip *
+          cd ..
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: luminary-${{ github.event.inputs.version }}-${{ matrix.target }}
+          path: |
+            luminary-${{ github.event.inputs.version }}-${{ matrix.target }}.tar.gz
+            luminary-${{ github.event.inputs.version }}-${{ matrix.target }}.zip
+
+  create-release:
+    needs: build-go
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Download artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+
+      - name: Create Release
+        id: create_release
+        uses: softprops/action-gh-release@v1
+        with:
+          tag_name: v${{ github.event.inputs.version }}
+          name: Luminary v${{ github.event.inputs.version }}
+          draft: true
+          files: artifacts/**/*
+          body: |
+            # Luminary v${{ github.event.inputs.version }}
+            
+            A streamlined CLI tool for searching and downloading manga across multiple sources.
+            
+            ## Downloads
+            
+            - **Windows**: luminary-${{ github.event.inputs.version }}-windows-amd64.zip
+            - **macOS Intel**: luminary-${{ github.event.inputs.version }}-darwin-amd64.tar.gz
+            - **macOS ARM (M-Series)**: luminary-${{ github.event.inputs.version }}-darwin-arm64.tar.gz
+            - **Linux x64**: luminary-${{ github.event.inputs.version }}-linux-amd64.tar.gz
+            - **Linux ARM64**: luminary-${{ github.event.inputs.version }}-linux-arm64.tar.gz
+            
+            ## Installation
+            
+            Download the appropriate file for your operating system, extract it, and add the executable to your PATH (optional).
