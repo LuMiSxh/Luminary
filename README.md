@@ -12,8 +12,6 @@
 
 You can download pre-built binaries from the [releases page](https://github.com/lumisxh/Luminary/releases) on GitHub. Choose the appropriate binary for your operating system and architecture.
 
-**NOTE: _Release binaries are not yet available_**
-
 ### Build from Source
 
 ```bash
