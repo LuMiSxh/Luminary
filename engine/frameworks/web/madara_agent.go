@@ -8,6 +8,7 @@ import (
 	"context"
 	"fmt"
 	"net/url"
+	"regexp"
 	"strings"
 	"time"
 )
@@ -85,16 +86,288 @@ func (a *MadaraAgent) FetchMainPage(ctx context.Context) (*engine.WebPage, error
 func (a *MadaraAgent) Search(ctx context.Context, query string, options engine.SearchOptions) ([]engine.Manga, error) {
 	a.engine.Logger.Info("[%s] Searching for: %s", a.ID(), query)
 
-	// Try multiple approaches to find manga
+	// Track whether we need to use multiple approaches to reach the requested limit
+	requestedLimit := options.Limit
+	if requestedLimit <= 0 {
+		requestedLimit = 50 // Default to 50 if not specified
+	}
 
-	// 1. First try direct page scraping (more reliable for some sites)
-	page, err := a.FetchMainPage(ctx)
-	if err == nil {
-		// Look for manga listings with different selectors
-		var mangaList []engine.Manga
+	// Create a slice to hold all manga results
+	var mangaList []engine.Manga
 
-		// Split the selector string and try each one
+	// Use a map to track unique manga IDs to avoid duplicates
+	uniqueMangaIDs := make(map[string]bool)
+
+	// For the list command, we should prioritize AJAX pagination to get proper results
+	// But for search, we might want to try direct page first for better relevance
+	if query == "" || requestedLimit > 40 || options.Pages > 1 {
+		// For empty query (list command) or when requesting more than typical page size,
+		// use AJAX pagination first
+		a.engine.Logger.Info("[%s] Using AJAX pagination for limit=%d, pages=%d",
+			a.ID(), requestedLimit, options.Pages)
+
+		results, err := a.searchWithAjax(ctx, query, options)
+		if err == nil && len(results) > 0 {
+			// Add results to our combined list with deduplication
+			for _, manga := range results {
+				if !uniqueMangaIDs[manga.ID] {
+					uniqueMangaIDs[manga.ID] = true
+					mangaList = append(mangaList, manga)
+				}
+			}
+
+			// If we got enough results, return directly
+			if len(mangaList) >= requestedLimit || options.Pages == 1 {
+				a.engine.Logger.Info("[%s] Found %d manga with AJAX pagination (limit: %d)",
+					a.ID(), len(mangaList), requestedLimit)
+
+				// Apply the final limit if still needed
+				if len(mangaList) > requestedLimit {
+					mangaList = mangaList[:requestedLimit]
+				}
+
+				return mangaList, nil
+			}
+		}
+	}
+
+	// Try direct page scraping as a fallback or additional source
+	needMore := len(mangaList) < requestedLimit
+
+	if needMore {
+		// 1. Try direct page scraping (more reliable for some sites)
+		page, err := a.FetchMainPage(ctx)
+		if err == nil {
+			// Look for manga listings with different selectors
+			selectors := strings.Split(a.config.MangaSelector, ",")
+			for _, selector := range selectors {
+				selector = strings.TrimSpace(selector)
+				if selector == "" {
+					continue
+				}
+
+				elements, err := page.Find(selector)
+				if err == nil && len(elements) > 0 {
+					a.engine.Logger.Info("Found manga elements using selector: %s", selector)
+
+					for _, elem := range elements {
+						href := elem.Attr("href")
+						if href == "" {
+							continue
+						}
+
+						title := elem.Text()
+						if title == "" {
+							continue
+						}
+
+						// Filter by query if provided
+						if query != "" && !strings.Contains(strings.ToLower(title), strings.ToLower(query)) {
+							continue
+						}
+
+						// Extract manga ID from URL
+						id := engine.ExtractPathFromURL(href)
+						if id == "" {
+							continue
+						}
+
+						// Skip duplicates
+						if uniqueMangaIDs[id] {
+							continue
+						}
+						uniqueMangaIDs[id] = true
+
+						// Add to results
+						mangaList = append(mangaList, engine.Manga{
+							ID:    id,
+							Title: title,
+						})
+
+						// Stop if we've reached the requested limit
+						if len(mangaList) >= requestedLimit {
+							break
+						}
+					}
+
+					if len(mangaList) > 0 {
+						break
+					}
+				}
+			}
+		}
+	}
+
+	// If direct scraping didn't produce results or didn't provide enough,
+	// and we haven't tried AJAX yet, try that as a last resort
+	needMore = len(mangaList) < requestedLimit && (query != "" && requestedLimit <= 40 && options.Pages == 1)
+
+	if needMore && len(mangaList) == 0 {
+		ajaxResults, err := a.searchWithAjax(ctx, query, options)
+		if err == nil {
+			// Add results to our combined list with deduplication
+			for _, manga := range ajaxResults {
+				if !uniqueMangaIDs[manga.ID] {
+					uniqueMangaIDs[manga.ID] = true
+					mangaList = append(mangaList, manga)
+				}
+
+				// Stop if we've reached the requested limit
+				if len(mangaList) >= requestedLimit {
+					break
+				}
+			}
+		}
+	}
+
+	// Apply the final limit if needed
+	if len(mangaList) > requestedLimit {
+		mangaList = mangaList[:requestedLimit]
+	}
+
+	a.engine.Logger.Info("[%s] Found total of %d manga", a.ID(), len(mangaList))
+	return mangaList, nil
+}
+
+// searchWithAjax uses the WordPress AJAX API to search for manga with proper pagination
+func (a *MadaraAgent) searchWithAjax(ctx context.Context, query string, options engine.SearchOptions) ([]engine.Manga, error) {
+	// Determine requested limit
+	requestedLimit := options.Limit
+	if requestedLimit <= 0 {
+		requestedLimit = 100
+	}
+
+	// Determine how many pages to fetch based on options
+	pagesToFetch := options.Pages
+	if pagesToFetch <= 0 && requestedLimit > 0 {
+		// For KissManga, calculate based on 40 items per page
+		itemsPerPage := 40
+		pagesToFetch = (requestedLimit + itemsPerPage - 1) / itemsPerPage
+
+		// Add 1 extra page for safety
+		pagesToFetch++
+
+		a.engine.Logger.Info("[%s] Auto-calculated %d pages needed to satisfy limit of %d (at ~%d items per page)",
+			a.ID(), pagesToFetch, requestedLimit, itemsPerPage)
+	}
+
+	if pagesToFetch <= 0 {
+		// Default to at least 1 page
+		pagesToFetch = 1
+	}
+
+	// Create a slice to hold all manga results
+	var allManga []engine.Manga
+
+	// Use a map to track unique manga IDs to avoid duplicates
+	uniqueMangaIDs := make(map[string]bool)
+
+	// Fetch each page of results
+	for currentPage := 0; currentPage < pagesToFetch; currentPage++ {
+		// Check if we've already reached the limit
+		if requestedLimit > 0 && len(allManga) >= requestedLimit {
+			a.engine.Logger.Info("[%s] Already collected %d manga (requested: %d), stopping pagination",
+				a.ID(), len(allManga), requestedLimit)
+			break
+		}
+
+		a.engine.Logger.Info("[%s] Fetching manga list page %d of %d (collected %d/%d so far)",
+			a.ID(), currentPage+1, pagesToFetch, len(allManga), requestedLimit)
+
+		// Create form data for the AJAX request
+		formData := url.Values{}
+
+		// Use custom action if provided, otherwise use default
+		action := "madara_load_more"
+		if a.config.CustomLoadAction != "" {
+			action = a.config.CustomLoadAction
+		}
+
+		// KissManga uses a different pagination approach
+		// The first page is 0, but subsequent pages use different parameter format
+		formData.Set("action", action)
+		formData.Set("template", "madara-core/content/content-archive")
+
+		if currentPage == 0 {
+			// First page
+			formData.Set("page", "0")
+			formData.Set("vars[paged]", "1") // KissManga expects paged=1 for first page
+		} else {
+			// Subsequent pages - KissManga expects page=N and paged=N+1
+			formData.Set("page", fmt.Sprintf("%d", currentPage))
+			formData.Set("vars[paged]", fmt.Sprintf("%d", currentPage+1))
+		}
+
+		// Set other parameters
+		formData.Set("vars[post_type]", "wp-manga")
+		formData.Set("vars[posts_per_page]", "100") // Request maximum items
+		formData.Set("vars[orderby]", "date")       // Sort by date (most Madara sites default to this)
+		formData.Set("vars[order]", "DESC")         // Descending order (newest first)
+
+		if query != "" {
+			formData.Set("vars[s]", query)
+		}
+
+		// Debug log the form data
+		a.engine.Logger.Debug("[%s] AJAX request params for page %d: %v",
+			a.ID(), currentPage+1, formData)
+
+		// Create request
+		req := engine.NewScraperRequest(engine.UrlJoin(a.config.SiteURL, "wp-admin/admin-ajax.php"))
+		req.SetMethod("POST")
+		for k, v := range a.config.Headers {
+			req.SetHeader(k, v)
+		}
+		req.SetHeader("Content-Type", "application/x-www-form-urlencoded; charset=UTF-8")
+		req.SetHeader("X-Requested-With", "XMLHttpRequest")
+		req.SetHeader("Origin", a.config.SiteURL)
+		req.SetHeader("Referer", a.config.SiteURL)
+		req.SetFormData(formData)
+
+		// Apply rate limiting between requests (except for first page)
+		if currentPage > 0 {
+			time.Sleep(1500 * time.Millisecond) // Increase delay to 1.5 seconds
+		}
+
+		// Fetch page
+		page, err := a.webScraper.FetchPage(ctx, req)
+		if err != nil {
+			a.engine.Logger.Warn("[%s] AJAX search failed for page %d: %v",
+				a.ID(), currentPage+1, err)
+			// If first page fails, return error; otherwise just use what we have
+			if currentPage == 0 {
+				return []engine.Manga{}, err
+			}
+			break
+		}
+
+		// Try different selectors to find manga entries
+		var pageResults []engine.Manga
 		selectors := strings.Split(a.config.MangaSelector, ",")
+
+		// Debug - check if page content exists
+		pageHTML := page.GetText()
+		if pageHTML == "" {
+			a.engine.Logger.Warn("[%s] Empty page content received for page %d",
+				a.ID(), currentPage+1)
+		} else {
+			// Check if page content contains manga entries by looking for common patterns
+			hasMangaContent := strings.Contains(pageHTML, "post-title") ||
+				strings.Contains(pageHTML, "manga-title") ||
+				strings.Contains(pageHTML, "page-item-detail")
+
+			if !hasMangaContent {
+				a.engine.Logger.Debug("[%s] Page %d doesn't appear to contain manga entries",
+					a.ID(), currentPage+1)
+
+				// Add a small excerpt of the content for debugging
+				contentPreview := pageHTML
+				if len(contentPreview) > 200 {
+					contentPreview = contentPreview[:200] + "..."
+				}
+			}
+		}
+
 		for _, selector := range selectors {
 			selector = strings.TrimSpace(selector)
 			if selector == "" {
@@ -102,9 +375,16 @@ func (a *MadaraAgent) Search(ctx context.Context, query string, options engine.S
 			}
 
 			elements, err := page.Find(selector)
-			if err == nil && len(elements) > 0 {
-				a.engine.Logger.Info("Found manga elements using selector: %s", selector)
+			if err != nil {
+				a.engine.Logger.Debug("[%s] Selector '%s' failed: %v",
+					a.ID(), selector, err)
+				continue
+			}
 
+			a.engine.Logger.Debug("[%s] Selector '%s' found %d elements on page %d",
+				a.ID(), selector, len(elements), currentPage+1)
+
+			if len(elements) > 0 {
 				for _, elem := range elements {
 					href := elem.Attr("href")
 					if href == "" {
@@ -127,120 +407,100 @@ func (a *MadaraAgent) Search(ctx context.Context, query string, options engine.S
 						continue
 					}
 
+					// Check if we already have this manga (avoid duplicates)
+					if uniqueMangaIDs[id] {
+						continue
+					}
+					uniqueMangaIDs[id] = true
+
 					// Add to results
-					mangaList = append(mangaList, engine.Manga{
+					pageResults = append(pageResults, engine.Manga{
 						ID:    id,
 						Title: title,
 					})
 				}
-
-				if len(mangaList) > 0 {
-					a.engine.Logger.Info("Found %d manga by direct page scraping", len(mangaList))
-					return mangaList, nil
-				}
-			}
-		}
-	}
-
-	// 2. If direct scraping failed, try AJAX requests (common in Madara sites)
-	return a.searchWithAjax(ctx, query, options)
-}
-
-// searchWithAjax uses the WordPress AJAX API to search for manga
-func (a *MadaraAgent) searchWithAjax(ctx context.Context, query string, options engine.SearchOptions) ([]engine.Manga, error) {
-	// Determine limit
-	limit := options.Limit
-	if limit <= 0 {
-		limit = 100
-	}
-
-	// Create form data for the AJAX request
-	formData := url.Values{}
-
-	// Use custom action if provided, otherwise use default
-	action := "madara_load_more"
-	if a.config.CustomLoadAction != "" {
-		action = a.config.CustomLoadAction
-	}
-
-	formData.Set("action", action)
-	formData.Set("template", "madara-core/content/content-archive")
-	formData.Set("page", "0")
-	formData.Set("vars[paged]", "0")
-	formData.Set("vars[post_type]", "wp-manga")
-	formData.Set("vars[posts_per_page]", fmt.Sprintf("%d", limit))
-
-	if query != "" {
-		formData.Set("vars[s]", query)
-	}
-
-	// Create request
-	req := engine.NewScraperRequest(engine.UrlJoin(a.config.SiteURL, "wp-admin/admin-ajax.php"))
-	req.SetMethod("POST")
-	for k, v := range a.config.Headers {
-		req.SetHeader(k, v)
-	}
-	req.SetHeader("Content-Type", "application/x-www-form-urlencoded; charset=UTF-8")
-	req.SetHeader("X-Requested-With", "XMLHttpRequest")
-	req.SetHeader("Origin", a.config.SiteURL)
-	req.SetHeader("Referer", a.config.SiteURL)
-	req.SetFormData(formData)
-
-	// Fetch page
-	page, err := a.webScraper.FetchPage(ctx, req)
-	if err != nil {
-		a.engine.Logger.Warn("AJAX search failed: %v", err)
-		return []engine.Manga{}, nil
-	}
-
-	// Try different selectors to find manga entries
-	var mangaList []engine.Manga
-	selectors := strings.Split(a.config.MangaSelector, ",")
-
-	for _, selector := range selectors {
-		selector = strings.TrimSpace(selector)
-		if selector == "" {
-			continue
-		}
-
-		elements, err := page.Find(selector)
-		if err == nil && len(elements) > 0 {
-			for _, elem := range elements {
-				href := elem.Attr("href")
-				if href == "" {
-					continue
-				}
-
-				title := elem.Text()
-				if title == "" {
-					continue
-				}
-
-				// Filter by query if provided
-				if query != "" && !strings.Contains(strings.ToLower(title), strings.ToLower(query)) {
-					continue
-				}
-
-				// Extract manga ID from URL
-				id := engine.ExtractPathFromURL(href)
-				if id == "" {
-					continue
-				}
-
-				mangaList = append(mangaList, engine.Manga{
-					ID:    id,
-					Title: title,
-				})
 			}
 
-			if len(mangaList) > 0 {
-				a.engine.Logger.Info("Found %d manga via AJAX", len(mangaList))
+			if len(pageResults) > 0 {
 				break
 			}
 		}
+
+		a.engine.Logger.Info("[%s] Found %d manga on page %d",
+			a.ID(), len(pageResults), currentPage+1)
+
+		// Add page results to the combined results
+		allManga = append(allManga, pageResults...)
+
+		// If we didn't get any results for this page, we're probably at the end
+		if len(pageResults) == 0 {
+			a.engine.Logger.Info("[%s] No more results found after page %d, stopping pagination",
+				a.ID(), currentPage+1)
+			break
+		}
+
+		// If we're at the requested page limit, stop
+		if options.Pages > 0 && currentPage+1 >= options.Pages {
+			a.engine.Logger.Info("[%s] Reached requested page limit of %d",
+				a.ID(), options.Pages)
+			break
+		}
+
+		// Check for context cancellation or timeout
+		select {
+		case <-ctx.Done():
+			a.engine.Logger.Warn("[%s] Context cancelled or timed out after fetching %d pages",
+				a.ID(), currentPage+1)
+			break
+		default:
+			// Continue processing
+		}
 	}
 
-	return mangaList, nil
+	// Apply final limit if requested
+	if requestedLimit > 0 && len(allManga) > requestedLimit {
+		a.engine.Logger.Info("[%s] Trimming results from %d to requested limit %d",
+			a.ID(), len(allManga), requestedLimit)
+		allManga = allManga[:requestedLimit]
+	}
+
+	a.engine.Logger.Info("[%s] Found total of %d manga via AJAX pagination", a.ID(), len(allManga))
+	return allManga, nil
+}
+
+// cleanMadaraDescription cleans up a manga description from Madara-based sites
+// It removes excessive whitespace, "Show more" buttons, and common boilerplate text
+func cleanMadaraDescription(description string) string {
+	if description == "" {
+		return ""
+	}
+
+	// Check if it's a KissManga-style description with boilerplate text
+	if strings.Contains(description, "is a Manga/Manhwa/Manhua in english language") &&
+		strings.Contains(description, "updating comic site. The Summary is") {
+
+		// Extract just the actual description part
+		parts := strings.Split(description, "The Summary is")
+		if len(parts) > 1 {
+			description = parts[1]
+		}
+	}
+
+	// Remove "Show more" text and surrounding whitespace
+	description = strings.ReplaceAll(description, "Show more", "")
+
+	// Replace multiple newlines with a single newline
+	re := regexp.MustCompile(`\n\s*\n`)
+	description = re.ReplaceAllString(description, "\n")
+
+	// Replace multiple spaces with a single space
+	re = regexp.MustCompile(`[ \t]+`)
+	description = re.ReplaceAllString(description, " ")
+
+	// Trim whitespace from the beginning and end
+	description = strings.TrimSpace(description)
+
+	return description
 }
 
 // GetManga retrieves manga details
@@ -295,14 +555,35 @@ func (a *MadaraAgent) GetManga(ctx context.Context, id string) (*engine.MangaInf
 		".description-summary",
 		".summary__content",
 		".manga-excerpt",
+		".post-content_item:contains('Summary') .summary-content",
+		".summary-content",
+		".summary p",
 	}
 
 	for _, selector := range descSelectors {
 		descElement, err := page.FindOne(selector)
 		if err == nil && descElement != nil {
-			mangaInfo.Description = strings.TrimSpace(descElement.Text())
-			if mangaInfo.Description != "" {
-				break
+			rawDescription := strings.TrimSpace(descElement.Text())
+			if rawDescription != "" {
+				// Clean up the description to remove "Show more" and excessive whitespace
+				mangaInfo.Description = cleanMadaraDescription(rawDescription)
+				if mangaInfo.Description != "" {
+					break
+				}
+			}
+		}
+	}
+
+	// If we couldn't find a description with selectors, try to find it in the page content
+	if mangaInfo.Description == "" {
+		// Extract potential description from page content
+		pageText := page.GetText()
+		if strings.Contains(pageText, "The Summary is") {
+			parts := strings.Split(pageText, "The Summary is")
+			if len(parts) > 1 {
+				rawDescription := parts[1]
+				// Clean up the extracted description
+				mangaInfo.Description = cleanMadaraDescription(rawDescription)
 			}
 		}
 	}
