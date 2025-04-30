@@ -13,11 +13,10 @@ import (
 )
 
 var (
-	downloadOutput     string
-	downloadConcurrent int
-	downloadVolume     int  // Volume flag
-	downloadHasVolume  bool // Track if the volume flag was provided
-	downloadDebugMode  bool // Debug flag for detailed error information
+	downloadOutput    string
+	downloadVolume    int  // Volume flag
+	downloadHasVolume bool // Track if the volume flag was provided
+	downloadDebugMode bool // Debug flag for detailed error information
 )
 
 // DownloadInfo represents download info for API responses
@@ -40,7 +39,7 @@ var downloadCmd = &cobra.Command{
 		baseCtx := context.Background()
 
 		// Create a context with concurrency settings
-		ctx := engine.WithConcurrency(baseCtx, downloadConcurrent)
+		ctx := engine.WithConcurrency(baseCtx, maxConcurrency)
 
 		// Add volume override to context if provided
 		if downloadHasVolume {
@@ -86,7 +85,7 @@ var downloadCmd = &cobra.Command{
 					Agent:      agent.ID(),
 					AgentName:  agent.Name(),
 					OutputDir:  outputDir,
-					Concurrent: downloadConcurrent,
+					Concurrent: maxConcurrency,
 				}
 
 				// Add volume info if provided
@@ -100,7 +99,7 @@ var downloadCmd = &cobra.Command{
 				fmt.Printf("Downloading chapter %s from agent %s (%s)...\n",
 					chapterID, agent.ID(), agent.Name())
 				fmt.Printf("Output directory: %s\n", downloadOutput)
-				fmt.Printf("Concurrent downloads: %d\n", downloadConcurrent)
+				fmt.Printf("Concurrent downloads: %d\n", maxConcurrency)
 
 				// Print volume info if provided
 				if downloadHasVolume {
@@ -207,7 +206,6 @@ func init() {
 
 	// Flags
 	downloadCmd.Flags().StringVar(&downloadOutput, "output", "./downloads", "Output directory")
-	downloadCmd.Flags().IntVar(&downloadConcurrent, "concurrent", 5, "Number of concurrent downloads")
 	downloadCmd.Flags().BoolVar(&downloadDebugMode, "debug", false, "Show detailed error information")
 
 	// Add volume flag

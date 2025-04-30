@@ -130,6 +130,7 @@ func (s *SearchService) SearchAcrossProviders(
 	query string,
 	options SearchOptions,
 	agentIDs []string, // If empty, search all agents
+	concurrency int,
 ) (map[string][]Manga, error) {
 	results := make(map[string][]Manga)
 	var mu sync.Mutex
@@ -159,8 +160,10 @@ func (s *SearchService) SearchAcrossProviders(
 	defer cancel()
 
 	// Set semaphore for concurrency control
-	// Use a sensible number of concurrent searches to avoid overwhelming APIs
-	maxConcurrent := 3
+	maxConcurrent := concurrency
+	if maxConcurrent <= 0 {
+		maxConcurrent = 5 // Default fallback
+	}
 	semaphore := make(chan struct{}, maxConcurrent)
 
 	// Search each agent concurrently

@@ -97,6 +97,7 @@ var searchCmd = &cobra.Command{
 			query,
 			options,
 			agentIDs,
+			maxConcurrency,
 		)
 
 		if err != nil {

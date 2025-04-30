@@ -6,6 +6,7 @@ import (
 	"Luminary/utils"
 	"context"
 	"fmt"
+	"sync"
 	"time"
 
 	"github.com/spf13/cobra"
@@ -76,17 +77,31 @@ var listCmd = &cobra.Command{
 
 		if apiMode {
 			var allMangas []MangaListItem
+			var mu sync.Mutex
+			var wg sync.WaitGroup
+			errorChan := make(chan error, len(appEngine.AllAgents()))
 
-			// Function to list manga from a single agent
+			// Create semaphore for concurrency control
+			concurrency := maxConcurrency
+			if concurrency <= 0 {
+				concurrency = 5 // Default fallback
+			}
+			semaphore := make(chan struct{}, concurrency)
+
+			// Function to list manga from a single agent concurrently
 			listAgentMangas := func(agent engine.Agent) {
+				defer wg.Done()
+				defer func() { <-semaphore }() // Release semaphore
+
 				// Use empty search to get list of manga
 				mangas, err := agent.Search(ctx, "", options)
 				if err != nil {
-					// Handle errors but continue with other agents
-					handleListError(err, agent.ID(), agent.Name(), true)
+					errorChan <- fmt.Errorf("error from agent %s: %w", agent.ID(), err)
 					return
 				}
 
+				// Safely add results to the shared slice
+				mu.Lock()
 				for _, manga := range mangas {
 					mangaItem := MangaListItem{
 						ID:        utils.FormatMangaID(agent.ID(), manga.ID),
@@ -96,14 +111,33 @@ var listCmd = &cobra.Command{
 					}
 					allMangas = append(allMangas, mangaItem)
 				}
+				mu.Unlock()
 			}
 
 			if selectedAgent != nil {
-				listAgentMangas(selectedAgent)
+				wg.Add(1)
+				semaphore <- struct{}{} // Acquire semaphore
+				go listAgentMangas(selectedAgent)
 			} else {
-				// List manga from all agents
+				// List manga from all agents concurrently
 				for _, agent := range appEngine.AllAgents() {
-					listAgentMangas(agent)
+					wg.Add(1)
+					semaphore <- struct{}{} // Acquire semaphore
+					go listAgentMangas(agent)
+				}
+			}
+
+			// Wait for all operations to complete
+			wg.Wait()
+			close(errorChan)
+
+			// Process any errors
+			var errors []error
+			for err := range errorChan {
+				errors = append(errors, err)
+				// Handle errors but continue
+				if listDebugMode {
+					fmt.Printf("Debug: %v\n", err)
 				}
 			}
 
@@ -120,8 +154,8 @@ var listCmd = &cobra.Command{
 
 			utils.OutputJSON("success", responseData, nil)
 		} else {
-			// Interactive mode for CLI users
 			if selectedAgent != nil {
+				// Single agent case - no need for parallelism
 				fmt.Printf("Listing manga from agent: %s (%s)\n", selectedAgent.ID(), selectedAgent.Name())
 				fmt.Printf("Limit: %d manga per page\n", options.Limit)
 				if options.Pages > 0 {
@@ -131,7 +165,7 @@ var listCmd = &cobra.Command{
 				}
 				fmt.Println()
 
-				// Use empty search to get list of manga
+				// Use empty search to get the list of manga
 				mangas, err := selectedAgent.Search(ctx, "", options)
 				if err != nil {
 					handleListError(err, selectedAgent.ID(), selectedAgent.Name(), false)
@@ -140,6 +174,7 @@ var listCmd = &cobra.Command{
 
 				displayMangaList(mangas, selectedAgent)
 			} else {
+				// Multiple agents - use parallel processing
 				fmt.Println("Listing manga from all agents:")
 				fmt.Printf("Limit: %d manga per page\n", options.Limit)
 				if options.Pages > 0 {
@@ -147,21 +182,55 @@ var listCmd = &cobra.Command{
 				} else {
 					fmt.Println("Pages: all available")
 				}
-				fmt.Println()
+				fmt.Printf("Concurrency: %d\n", maxConcurrency)
+				fmt.Println("\nFetching data from agents in parallel. Results will appear as they complete...")
 
-				for _, agent := range appEngine.AllAgents() {
-					fmt.Printf("\nFrom agent: %s (%s)\n", agent.ID(), agent.Name())
-
-					// Use empty search to get list of manga
-					mangas, err := agent.Search(ctx, "", options)
-					if err != nil {
-						// In multi-agent mode, we show errors but continue with other agents
-						handleListError(err, agent.ID(), agent.Name(), true)
-						continue
-					}
-
-					displayMangaList(mangas, agent)
+				// Create synchronization primitives
+				var wg sync.WaitGroup
+				var mu sync.Mutex
+				concurrency := maxConcurrency
+				if concurrency <= 0 {
+					concurrency = 3 // Default fallback
 				}
+				semaphore := make(chan struct{}, concurrency)
+
+				// Process each agent concurrently
+				for _, agent := range appEngine.AllAgents() {
+					wg.Add(1)
+					semaphore <- struct{}{} // Acquire semaphore
+
+					go func(a engine.Agent) {
+						defer wg.Done()
+						defer func() { <-semaphore }() // Release semaphore
+
+						// Use empty search to get list of manga
+						mangas, err := a.Search(ctx, "", options)
+
+						// Lock while we print to avoid interleaved output
+						mu.Lock()
+						defer mu.Unlock()
+
+						fmt.Printf("\n--- From agent: %s (%s) ---\n", a.ID(), a.Name())
+
+						if err != nil {
+							// Show error but continue with other agents
+							handleListError(err, a.ID(), a.Name(), true)
+							return
+						}
+
+						if len(mangas) == 0 {
+							fmt.Println("No manga found.")
+							return
+						}
+
+						// Display results
+						displayMangaList(mangas, a)
+					}(agent)
+				}
+
+				// Wait for all agents to complete
+				wg.Wait()
+				fmt.Println("\nAll agents completed processing.")
 			}
 		}
 	},
