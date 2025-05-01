@@ -21,12 +21,11 @@ var (
 
 // DownloadInfo represents download info for API responses
 type DownloadInfo struct {
-	ChapterID  string `json:"chapter_id"`
-	Agent      string `json:"agent"`
-	AgentName  string `json:"agent_name"`
-	OutputDir  string `json:"output_dir"`
-	Concurrent int    `json:"concurrent"`
-	Volume     *int   `json:"volume,omitempty"` // Volume in API response
+	ChapterID string `json:"chapter_id"`
+	Agent     string `json:"agent"`
+	AgentName string `json:"agent_name"`
+	OutputDir string `json:"output_dir"`
+	Volume    *int   `json:"volume,omitempty"` // Volume in API response
 }
 
 var downloadCmd = &cobra.Command{
@@ -81,11 +80,10 @@ var downloadCmd = &cobra.Command{
 			if apiMode {
 				// Prepare download info for API response
 				downloadInfo := DownloadInfo{
-					ChapterID:  chapterID,
-					Agent:      agent.ID(),
-					AgentName:  agent.Name(),
-					OutputDir:  outputDir,
-					Concurrent: maxConcurrency,
+					ChapterID: chapterID,
+					Agent:     agent.ID(),
+					AgentName: agent.Name(),
+					OutputDir: outputDir,
 				}
 
 				// Add volume info if provided

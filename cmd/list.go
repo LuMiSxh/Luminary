@@ -42,6 +42,9 @@ var listCmd = &cobra.Command{
 		ctx, cancel := context.WithTimeout(context.Background(), timeoutDuration)
 		defer cancel()
 
+		// Set the Concurrency limit for the engine
+		ctx = engine.WithConcurrency(ctx, maxConcurrency)
+
 		// Inform user about extended timeout if applicable
 		if timeoutDuration > time.Minute && !apiMode {
 			fmt.Printf("Note: Using extended timeout of %v for this request.\n",

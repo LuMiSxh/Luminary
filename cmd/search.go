@@ -2,7 +2,7 @@ package cmd
 
 import (
 	"Luminary/engine"
-	"Luminary/errors" // Import our custom errors package
+	"Luminary/errors"
 	"Luminary/utils"
 	"context"
 	"fmt"
@@ -21,7 +21,6 @@ var (
 	fieldFilters     map[string]string
 	includeAltTitles bool
 	includeAllLangs  bool
-	searchDebugMode  bool // Debug flag for detailed error information
 )
 
 // MangaSearchResult represents a manga search result for API output
@@ -53,6 +52,9 @@ var searchCmd = &cobra.Command{
 		// Create context with dynamic timeout
 		ctx, cancel := context.WithTimeout(context.Background(), timeoutDuration)
 		defer cancel()
+
+		// Set concurrency limit in the context
+		ctx = engine.WithConcurrency(ctx, maxConcurrency)
 
 		// Inform user about extended timeout if applicable
 		if timeoutDuration > time.Minute && !apiMode {
@@ -97,7 +99,6 @@ var searchCmd = &cobra.Command{
 			query,
 			options,
 			agentIDs,
-			maxConcurrency,
 		)
 
 		if err != nil {
@@ -127,9 +128,6 @@ func handleSearchError(err error, query, agentSpec string) {
 			utils.OutputJSON("error", nil, fmt.Errorf("server error from %s: %v", agentName, err))
 		} else {
 			fmt.Printf("Error: Server error while searching with %s. Please try again later.\n", agentName)
-			if searchDebugMode {
-				fmt.Printf("Debug details: %v\n", err)
-			}
 		}
 		return
 	}
@@ -159,16 +157,6 @@ func handleSearchError(err error, query, agentSpec string) {
 		utils.OutputJSON("error", nil, err)
 	} else {
 		fmt.Printf("Error searching: %v\n", err)
-		if searchDebugMode {
-			// Print more detailed error info in debug mode
-			fmt.Println("\nDebug error details:")
-			fmt.Printf("  Query: %s\n", query)
-			if agentSpec != "" {
-				fmt.Printf("  Agent: %s\n", agentSpec)
-			}
-			fmt.Printf("  Error type: %T\n", err)
-			fmt.Printf("  Full error: %+v\n", err)
-		}
 	}
 }
 
@@ -289,6 +277,9 @@ func displayConsoleResults(results map[string][]engine.Manga, query string, opti
 		}
 	}
 
+	// Display concurrency information
+	fmt.Printf("Concurrency: %d\n", maxConcurrency)
+
 	fmt.Printf("\nTotal results found: %d\n\n", totalCount)
 
 	// Display results for each agent using the standardized display functions
@@ -325,7 +316,6 @@ func init() {
 	searchCmd.Flags().StringSliceVar(&searchFields, "fields", []string{}, "Fields to search in (title, author, genre), empty means all")
 	searchCmd.Flags().BoolVar(&includeAltTitles, "alt-titles", true, "Include alternative titles in search")
 	searchCmd.Flags().BoolVar(&includeAllLangs, "all-langs", true, "Search across all language versions of titles")
-	searchCmd.Flags().BoolVar(&searchDebugMode, "debug", false, "Show detailed error information")
 
 	// Field-specific filters
 	fieldFilters = make(map[string]string)

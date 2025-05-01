@@ -59,7 +59,7 @@ func (s *SearchService) ExecuteSearch(
 	s.Logger.Info("[%s] Searching for: %s (limit: %d, pages: %d)", agentID, query, options.Limit, options.Pages)
 
 	// Apply rate limiting
-	domain := extractDomainFromUrl(apiConfig.BaseURL)
+	domain := ExtractDomain(apiConfig.BaseURL)
 	s.RateLimiter.Wait(domain)
 
 	// Determine maximum pages to fetch
@@ -124,13 +124,13 @@ func (s *SearchService) ExecuteSearch(
 }
 
 // SearchAcrossProviders performs a search across multiple or all providers
+// Now uses context for concurrency settings instead of a direct parameter
 func (s *SearchService) SearchAcrossProviders(
 	ctx context.Context,
 	engine *Engine,
 	query string,
 	options SearchOptions,
 	agentIDs []string, // If empty, search all agents
-	concurrency int,
 ) (map[string][]Manga, error) {
 	results := make(map[string][]Manga)
 	var mu sync.Mutex
@@ -159,11 +159,10 @@ func (s *SearchService) SearchAcrossProviders(
 	searchCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
 	defer cancel()
 
-	// Set semaphore for concurrency control
-	maxConcurrent := concurrency
-	if maxConcurrent <= 0 {
-		maxConcurrent = 5 // Default fallback
-	}
+	// Get concurrency limit from context
+	maxConcurrent := GetConcurrency(ctx, 5) // Default to 5 if not set in context
+	s.Logger.Debug("Using concurrency limit of %d from context", maxConcurrent)
+
 	semaphore := make(chan struct{}, maxConcurrent)
 
 	// Search each agent concurrently
@@ -310,11 +309,4 @@ func (s *SearchService) SortResults(results []Manga, sortBy string) []Manga {
 	}
 
 	return sorted
-}
-
-// extractDomainFromUrl extracts the domain from a URL string
-func extractDomainFromUrl(urlStr string) string {
-	// Simple extraction - just return the URL as is
-	// In a real implementation, this would use url.Parse to extract the hostname
-	return urlStr
 }

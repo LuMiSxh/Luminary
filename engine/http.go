@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
 	"time"
 )
 
@@ -27,6 +28,16 @@ type RequestOptions struct {
 	Referer         string
 	Method          string
 	FollowRedirects bool
+}
+
+// ExtractDomain extracts the domain from a URL
+func ExtractDomain(urlStr string) string {
+	parsed, err := url.Parse(urlStr)
+	if err != nil {
+		// If parsing fails, return the whole URL as the domain
+		return urlStr
+	}
+	return parsed.Host
 }
 
 // FetchWithRetries performs an HTTP request with retry logic

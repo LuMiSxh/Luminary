@@ -10,6 +10,7 @@ import (
 	"net/url"
 	"regexp"
 	"strings"
+	"sync"
 	"time"
 )
 
@@ -98,15 +99,28 @@ func (a *MadaraAgent) Search(ctx context.Context, query string, options engine.S
 	// Use a map to track unique manga IDs to avoid duplicates
 	uniqueMangaIDs := make(map[string]bool)
 
+	// Check context for concurrency settings
+	concurrency := engine.GetConcurrency(ctx, 1) // Default to sequential if not specified
+	useParallel := concurrency > 1
+
 	// For the list command, we should prioritize AJAX pagination to get proper results
 	// But for search, we might want to try direct page first for better relevance
 	if query == "" || requestedLimit > 40 || options.Pages > 1 {
 		// For empty query (list command) or when requesting more than typical page size,
 		// use AJAX pagination first
-		a.engine.Logger.Info("[%s] Using AJAX pagination for limit=%d, pages=%d",
-			a.ID(), requestedLimit, options.Pages)
+		a.engine.Logger.Info("[%s] Using AJAX pagination for limit=%d, pages=%d, concurrency=%d",
+			a.ID(), requestedLimit, options.Pages, concurrency)
 
-		results, err := a.searchWithAjax(ctx, query, options)
+		var results []engine.Manga
+		var err error
+
+		// Use parallel search if concurrency > 1, otherwise use sequential
+		if useParallel {
+			results, err = a.searchWithAjaxParallel(ctx, query, options, concurrency)
+		} else {
+			results, err = a.searchWithAjax(ctx, query, options)
+		}
+
 		if err == nil && len(results) > 0 {
 			// Add results to our combined list with deduplication
 			for _, manga := range results {
@@ -118,11 +132,13 @@ func (a *MadaraAgent) Search(ctx context.Context, query string, options engine.S
 
 			// If we got enough results, return directly
 			if len(mangaList) >= requestedLimit || options.Pages == 1 {
-				a.engine.Logger.Info("[%s] Found %d manga with AJAX pagination (limit: %d)",
-					a.ID(), len(mangaList), requestedLimit)
+				a.engine.Logger.Info("[%s] Found %d manga with %s AJAX pagination (limit: %d)",
+					a.ID(), len(mangaList),
+					map[bool]string{true: "parallel", false: "sequential"}[useParallel],
+					requestedLimit)
 
-				// Apply the final limit if still needed
-				if len(mangaList) > requestedLimit {
+				// Apply the final limit if still needed, but only if not using explicit pagination
+				if len(mangaList) > requestedLimit && options.Pages <= 1 {
 					mangaList = mangaList[:requestedLimit]
 				}
 
@@ -203,7 +219,16 @@ func (a *MadaraAgent) Search(ctx context.Context, query string, options engine.S
 	needMore = len(mangaList) < requestedLimit && (query != "" && requestedLimit <= 40 && options.Pages == 1)
 
 	if needMore && len(mangaList) == 0 {
-		ajaxResults, err := a.searchWithAjax(ctx, query, options)
+		var ajaxResults []engine.Manga
+		var err error
+
+		// Use parallel search if concurrency > 1, otherwise use sequential
+		if useParallel {
+			ajaxResults, err = a.searchWithAjaxParallel(ctx, query, options, concurrency)
+		} else {
+			ajaxResults, err = a.searchWithAjax(ctx, query, options)
+		}
+
 		if err == nil {
 			// Add results to our combined list with deduplication
 			for _, manga := range ajaxResults {
@@ -220,8 +245,8 @@ func (a *MadaraAgent) Search(ctx context.Context, query string, options engine.S
 		}
 	}
 
-	// Apply the final limit if needed
-	if len(mangaList) > requestedLimit {
+	// Apply the final limit if needed, but only if not using explicit pagination
+	if len(mangaList) > requestedLimit && options.Pages <= 1 {
 		mangaList = mangaList[:requestedLimit]
 	}
 
@@ -264,11 +289,14 @@ func (a *MadaraAgent) searchWithAjax(ctx context.Context, query string, options 
 
 	// Fetch each page of results
 	for currentPage := 0; currentPage < pagesToFetch; currentPage++ {
-		// Check if we've already reached the limit
-		if requestedLimit > 0 && len(allManga) >= requestedLimit {
+		// Only stop on limit if not using explicit pagination
+		if requestedLimit > 0 && len(allManga) >= requestedLimit && options.Pages <= 0 {
 			a.engine.Logger.Info("[%s] Already collected %d manga (requested: %d), stopping pagination",
 				a.ID(), len(allManga), requestedLimit)
 			break
+		} else if options.Pages > 0 {
+			a.engine.Logger.Debug("[%s] Collected %d manga so far, continuing to fetch requested pages (%d)",
+				a.ID(), len(allManga), options.Pages)
 		}
 
 		a.engine.Logger.Info("[%s] Fetching manga list page %d of %d (collected %d/%d so far)",
@@ -284,7 +312,7 @@ func (a *MadaraAgent) searchWithAjax(ctx context.Context, query string, options 
 		}
 
 		// KissManga uses a different pagination approach
-		// The first page is 0, but subsequent pages use different parameter format
+		// The first page is 0, but later pages use a different parameter format
 		formData.Set("action", action)
 		formData.Set("template", "madara-core/content/content-archive")
 
@@ -457,14 +485,283 @@ func (a *MadaraAgent) searchWithAjax(ctx context.Context, query string, options 
 		}
 	}
 
-	// Apply final limit if requested
-	if requestedLimit > 0 && len(allManga) > requestedLimit {
+	// Apply the final limit if requested, but only if not using explicit pagination
+	// When using explicit pagination (options.Pages > 0), don't apply the limit to the combined results
+	if requestedLimit > 0 && options.Pages <= 0 && len(allManga) > requestedLimit {
+		a.engine.Logger.Info("[%s] Trimming results from %d to requested limit %d",
+			a.ID(), len(allManga), requestedLimit)
+		allManga = allManga[:requestedLimit]
+	} else if options.Pages > 0 {
+		a.engine.Logger.Info("[%s] Using explicit pagination (%d pages), returning all %d results",
+			a.ID(), options.Pages, len(allManga))
+	}
+
+	a.engine.Logger.Info("[%s] Found total of %d manga via AJAX pagination", a.ID(), len(allManga))
+	return allManga, nil
+}
+
+// searchWithAjaxParallel uses the WordPress AJAX API to search for manga with parallel page fetching
+func (a *MadaraAgent) searchWithAjaxParallel(ctx context.Context, query string, options engine.SearchOptions, concurrency int) ([]engine.Manga, error) {
+	// Determine requested limit
+	requestedLimit := options.Limit
+	if requestedLimit <= 0 {
+		requestedLimit = 100
+	}
+
+	// Determine how many pages to fetch based on options
+	pagesToFetch := options.Pages
+	if pagesToFetch <= 0 {
+		// For Madara sites, calculate based on 40 items per page
+		itemsPerPage := 40
+		pagesToFetch = (requestedLimit + itemsPerPage - 1) / itemsPerPage
+
+		// Add 1 extra page for safety
+		pagesToFetch++
+
+		a.engine.Logger.Info("[%s] Auto-calculated %d pages needed to satisfy limit of %d (at ~%d items per page)",
+			a.ID(), pagesToFetch, requestedLimit, itemsPerPage)
+	}
+
+	if pagesToFetch <= 0 {
+		// Default to at least 1 page
+		pagesToFetch = 1
+	}
+
+	// Ensure reasonable concurrency
+	if concurrency <= 0 {
+		concurrency = 1
+	} else if concurrency > pagesToFetch {
+		concurrency = pagesToFetch
+	}
+
+	a.engine.Logger.Info("[%s] Starting parallel search with concurrency %d, fetching %d pages",
+		a.ID(), concurrency, pagesToFetch)
+
+	// Create a slice to hold all manga results
+	var allManga []engine.Manga
+	var resultsMutex sync.Mutex
+
+	// Use a map to track unique manga IDs to avoid duplicates
+	uniqueMangaIDs := make(map[string]bool)
+
+	// Create a wait group to wait for all goroutines to finish
+	var wg sync.WaitGroup
+
+	// Create a channel to limit concurrency
+	semaphore := make(chan struct{}, concurrency)
+
+	// Create a channel for errors
+	errorChan := make(chan error, pagesToFetch)
+
+	// Create a slice to hold results from each page, to maintain order
+	type pageResult struct {
+		page    int
+		results []engine.Manga
+	}
+	resultsChan := make(chan pageResult, pagesToFetch)
+
+	// Launch a goroutine for each page
+	for currentPage := 0; currentPage < pagesToFetch; currentPage++ {
+		// Increment wait group counter
+		wg.Add(1)
+
+		// Acquire semaphore token (this blocks if we've reached max concurrency)
+		semaphore <- struct{}{}
+
+		// Launch goroutine for this page
+		go func(page int) {
+			// Release semaphore token and decrement wait group counter when done
+			defer func() {
+				<-semaphore
+				wg.Done()
+			}()
+
+			a.engine.Logger.Debug("[%s] Fetching page %d of %d in parallel",
+				a.ID(), page+1, pagesToFetch)
+
+			// Create form data for the AJAX request
+			formData := url.Values{}
+
+			// Use custom action if provided, otherwise use default
+			action := "madara_load_more"
+			if a.config.CustomLoadAction != "" {
+				action = a.config.CustomLoadAction
+			}
+
+			// Set form data based on page number
+			formData.Set("action", action)
+			formData.Set("template", "madara-core/content/content-archive")
+
+			if page == 0 {
+				// First page
+				formData.Set("page", "0")
+				formData.Set("vars[paged]", "1") // KissManga expects paged=1 for first page
+			} else {
+				// Subsequent pages - KissManga expects page=N and paged=N+1
+				formData.Set("page", fmt.Sprintf("%d", page))
+				formData.Set("vars[paged]", fmt.Sprintf("%d", page+1))
+			}
+
+			// Set other parameters
+			formData.Set("vars[post_type]", "wp-manga")
+			formData.Set("vars[posts_per_page]", "100") // Request maximum items
+			formData.Set("vars[orderby]", "date")       // Sort by date (most Madara sites default to this)
+			formData.Set("vars[order]", "DESC")         // Descending order (newest first)
+
+			if query != "" {
+				formData.Set("vars[s]", query)
+			}
+
+			// Create request
+			req := engine.NewScraperRequest(engine.UrlJoin(a.config.SiteURL, "wp-admin/admin-ajax.php"))
+			req.SetMethod("POST")
+			for k, v := range a.config.Headers {
+				req.SetHeader(k, v)
+			}
+			req.SetHeader("Content-Type", "application/x-www-form-urlencoded; charset=UTF-8")
+			req.SetHeader("X-Requested-With", "XMLHttpRequest")
+			req.SetHeader("Origin", a.config.SiteURL)
+			req.SetHeader("Referer", a.config.SiteURL)
+			req.SetFormData(formData)
+
+			// Apply rate limiting using engine's rate limiter service
+			domain := engine.ExtractDomain(a.config.SiteURL)
+			a.engine.RateLimiter.Wait(domain)
+
+			// Fetch page
+			fetchedPage, err := a.webScraper.FetchPage(ctx, req)
+			if err != nil {
+				a.engine.Logger.Warn("[%s] AJAX search failed for page %d: %v",
+					a.ID(), page+1, err)
+				errorChan <- err
+				return
+			}
+
+			// Parse the results
+			var pageResults []engine.Manga
+			selectors := strings.Split(a.config.MangaSelector, ",")
+
+			for _, selector := range selectors {
+				selector = strings.TrimSpace(selector)
+				if selector == "" {
+					continue
+				}
+
+				elements, err := fetchedPage.Find(selector)
+				if err != nil {
+					a.engine.Logger.Debug("[%s] Selector '%s' failed on page %d: %v",
+						a.ID(), selector, page+1, err)
+					continue
+				}
+
+				a.engine.Logger.Debug("[%s] Selector '%s' found %d elements on page %d",
+					a.ID(), selector, len(elements), page+1)
+
+				if len(elements) > 0 {
+					for _, elem := range elements {
+						href := elem.Attr("href")
+						if href == "" {
+							continue
+						}
+
+						title := elem.Text()
+						if title == "" {
+							continue
+						}
+
+						// Filter by query if provided
+						if query != "" && !strings.Contains(strings.ToLower(title), strings.ToLower(query)) {
+							continue
+						}
+
+						// Extract manga ID from URL
+						id := engine.ExtractPathFromURL(href)
+						if id == "" {
+							continue
+						}
+
+						// Use mutex when checking uniqueness
+						resultsMutex.Lock()
+						isDuplicate := uniqueMangaIDs[id]
+						if !isDuplicate {
+							uniqueMangaIDs[id] = true
+						}
+						resultsMutex.Unlock()
+
+						// Skip if duplicate
+						if isDuplicate {
+							continue
+						}
+
+						// Add to page results
+						pageResults = append(pageResults, engine.Manga{
+							ID:    id,
+							Title: title,
+						})
+					}
+				}
+
+				if len(pageResults) > 0 {
+					break
+				}
+			}
+
+			a.engine.Logger.Info("[%s] Found %d manga on page %d",
+				a.ID(), len(pageResults), page+1)
+
+			// Send results to channel
+			resultsChan <- pageResult{
+				page:    page,
+				results: pageResults,
+			}
+
+			// Check if we need to stop (e.g., no more results)
+			if len(pageResults) == 0 {
+				a.engine.Logger.Info("[%s] No results on page %d, may have reached end",
+					a.ID(), page+1)
+			}
+
+		}(currentPage)
+	}
+
+	// Wait for all goroutines to complete
+	wg.Wait()
+	close(semaphore)
+	close(errorChan)
+	close(resultsChan)
+
+	// Check for errors (we can continue with partial results)
+	var errs []error
+	for err := range errorChan {
+		errs = append(errs, err)
+	}
+	if len(errs) > 0 {
+		a.engine.Logger.Warn("[%s] %d pages failed to fetch", a.ID(), len(errs))
+	}
+
+	// Process results
+	resultsMap := make(map[int][]engine.Manga)
+	for result := range resultsChan {
+		resultsMap[result.page] = result.results
+	}
+
+	// Combine results in correct order
+	for i := 0; i < pagesToFetch; i++ {
+		if results, ok := resultsMap[i]; ok {
+			allManga = append(allManga, results...)
+		}
+	}
+
+	// Apply rhe final limit if requested, but only if not using explicit pagination
+	if options.Pages <= 0 && len(allManga) > requestedLimit {
 		a.engine.Logger.Info("[%s] Trimming results from %d to requested limit %d",
 			a.ID(), len(allManga), requestedLimit)
 		allManga = allManga[:requestedLimit]
 	}
 
-	a.engine.Logger.Info("[%s] Found total of %d manga via AJAX pagination", a.ID(), len(allManga))
+	a.engine.Logger.Info("[%s] Found total of %d manga via parallel AJAX pagination",
+		a.ID(), len(allManga))
+
 	return allManga, nil
 }
 

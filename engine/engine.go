@@ -3,7 +3,6 @@ package engine
 import (
 	"fmt"
 	"net/http"
-	"net/url"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -190,27 +189,4 @@ func (e *Engine) AgentExists(id string) bool {
 
 	_, exists := e.agents[id]
 	return exists
-}
-
-// CompilePattern is a helper method for ParserService
-func (p *ParserService) CompilePattern(pattern string) *regexp.Regexp {
-	re, found := p.RegexPatterns[pattern]
-	if found {
-		return re
-	}
-
-	// If not found, compile it
-	re = regexp.MustCompile(pattern)
-	p.RegexPatterns[pattern] = re
-	return re
-}
-
-// ExtractDomain extracts the domain from a URL
-func (e *Engine) ExtractDomain(urlStr string) string {
-	parsed, err := url.Parse(urlStr)
-	if err != nil {
-		// If parsing fails, return the whole URL as the domain
-		return urlStr
-	}
-	return parsed.Host
 }

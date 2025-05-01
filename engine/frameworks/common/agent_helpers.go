@@ -68,7 +68,7 @@ func ExecuteGetManga(
 	e.Logger.Info("[%s] Fetching manga details for: %s", agentID, mangaID)
 
 	// Apply rate limiting
-	domain := e.ExtractDomain(apiConfig.BaseURL)
+	domain := engine.ExtractDomain(apiConfig.BaseURL)
 	e.RateLimiter.Wait(domain)
 
 	// Fetch manga details using API service
@@ -156,7 +156,7 @@ func ExecuteGetChapter(
 	e.Logger.Info("[%s] Fetching chapter details for: %s", agentID, chapterID)
 
 	// Apply rate limiting
-	domain := e.ExtractDomain(apiConfig.BaseURL)
+	domain := engine.ExtractDomain(apiConfig.BaseURL)
 	e.RateLimiter.Wait(domain)
 
 	// Fetch chapter details using API service
@@ -315,18 +315,12 @@ func ExecuteDownloadChapter(
 		}
 	}
 
-	// Extract concurrency settings from context or use default
-	concurrency := e.Download.MaxConcurrency
-	if contextConcurrency := engine.GetConcurrency(ctx, concurrency); contextConcurrency > 0 {
-		concurrency = contextConcurrency
-	}
-
 	// Set up download configuration
+	// Removed the explicit concurrency setting - will be retrieved from context
 	config := engine.DownloadJobConfig{
-		Metadata:    metadata,
-		OutputDir:   destDir,
-		Concurrency: concurrency,
-		Files:       downloadFiles,
+		Metadata:  metadata,
+		OutputDir: destDir,
+		Files:     downloadFiles,
 		WaitDuration: func(isRetry bool) {
 			if isRetry {
 				time.Sleep(e.HTTP.ThrottleTimeAPI)
@@ -340,6 +334,7 @@ func ExecuteDownloadChapter(
 	e.Logger.Info("[%s] Downloading %d pages for chapter %s", agentID, len(chapter.Pages), chapterID)
 
 	// Use the engine's download service to download the chapter
+	// The context already contains concurrency settings
 	err = e.Download.DownloadChapter(ctx, config)
 	if err != nil {
 		e.Logger.Error("[%s] Download failed: %v", agentID, err)

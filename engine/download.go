@@ -44,7 +44,6 @@ type DownloadRequest struct {
 type DownloadJobConfig struct {
 	Metadata     ChapterMetadata   // Metadata for the chapter
 	OutputDir    string            // Base directory to save files
-	Concurrency  int               // Number of concurrent downloads
 	Files        []DownloadRequest // Files to download
 	WaitDuration func(bool)        // Optional throttling function (bool = isRetry)
 }
@@ -53,6 +52,12 @@ type DownloadJobConfig struct {
 func (d *DownloadService) DownloadChapter(ctx context.Context, config DownloadJobConfig) error {
 	// Use service client if not provided in config
 	client := d.Client
+
+	// Get concurrency from context or use default from service
+	concurrency := GetConcurrency(ctx, d.MaxConcurrency)
+	if d.Logger != nil {
+		d.Logger.Debug("Using concurrency limit of %d from context", concurrency)
+	}
 
 	// Check for volume override in context
 	if volumeOverride, hasOverride := GetVolumeOverride(ctx); hasOverride {
@@ -88,7 +93,7 @@ func (d *DownloadService) DownloadChapter(ctx context.Context, config DownloadJo
 
 	// Prepare worker pool
 	var wg sync.WaitGroup
-	semaphore := make(chan struct{}, config.Concurrency)
+	semaphore := make(chan struct{}, concurrency)
 	errorChan := make(chan error, len(config.Files))
 
 	// Process each file
