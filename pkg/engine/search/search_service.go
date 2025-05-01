@@ -51,7 +51,6 @@ func (s *Service) ExecuteSearch(
 	paginationConfig PaginationConfig,
 	extractorSet parser.ExtractorSet,
 ) ([]core.Manga, error) {
-	// ... (keep existing implementation)
 	s.Logger.Info("[%s] Searching for: %s (limit: %d, pages: %d)", providerID, query, options.Limit, options.Pages)
 
 	// Apply rate limiting
@@ -85,33 +84,64 @@ func (s *Service) ExecuteSearch(
 	}
 
 	resultsInterface, err := s.Pagination.FetchAllPages(ctx, params)
+
+	// IMPORTANT: Even if there was an error, we might have partial results
+	// Log the error but continue processing any results we got
 	if err != nil {
 		s.Logger.Error("[%s] Search error: %v", providerID, err)
-		return nil, fmt.Errorf("search error: %w", err)
+
+		// If we got no results at all, return the error
+		if len(resultsInterface) == 0 {
+			return nil, fmt.Errorf("search error: %w", err)
+		}
+
+		// Otherwise, log the error but continue with partial results
+		s.Logger.Info("[%s] Continuing with %d partial results despite error",
+			providerID, len(resultsInterface))
 	}
 
 	// Convert to Manga type
 	results := make([]core.Manga, 0, len(resultsInterface))
+	conversionErrors := 0
+
 	for _, item := range resultsInterface {
-		if manga, ok := item.(*core.Manga); ok {
+		if manga, ok := item.(*core.Manga); ok && manga != nil {
+			// Valid manga object, add to results
+			s.Logger.Debug("[%s] Successfully converted result: %s", providerID, manga.Title)
 			results = append(results, *manga)
+		} else {
+			// Failed to convert, log error and continue
+			conversionErrors++
+			s.Logger.Warn("[%s] Failed to convert search result item to Manga, got type: %T",
+				providerID, item)
 		}
+	}
+
+	if conversionErrors > 0 {
+		s.Logger.Warn("[%s] %d items couldn't be converted to Manga objects",
+			providerID, conversionErrors)
 	}
 
 	// Apply filters if they exist
 	if len(options.Filters) > 0 {
-		results = s.FilterResults(results, options.Filters)
+		filteredResults := s.FilterResults(results, options.Filters)
+		s.Logger.Info("[%s] Filtered from %d to %d results",
+			providerID, len(results), len(filteredResults))
+		results = filteredResults
 	}
 
 	// Apply sorting if specified
 	if options.Sort != "" && options.Sort != "relevance" {
 		results = s.SortResults(results, options.Sort)
+		s.Logger.Debug("[%s] Results sorted by %s", providerID, options.Sort)
 	}
 
 	// Apply final limit if specified
 	// Note: This is different from the per-page limit handled by pagination
 	// This applies to the total number of results after all pages are fetched
 	if options.Limit > 0 && options.Pages != 1 && len(results) > options.Limit*options.Pages {
+		s.Logger.Info("[%s] Trimming final results from %d to %d",
+			providerID, len(results), options.Limit*options.Pages)
 		results = results[:options.Limit*options.Pages]
 	}
 
@@ -122,7 +152,6 @@ func (s *Service) ExecuteSearch(
 // SearchAcrossProviders performs a search across a given list of providers
 func (s *Service) SearchAcrossProviders(
 	ctx context.Context,
-	// Pass the specific providers needed, not the whole engine
 	providersToSearch []provider.Provider,
 	query string,
 	options core.SearchOptions,
@@ -161,8 +190,7 @@ func (s *Service) SearchAcrossProviders(
 			default:
 			}
 
-			// Call Initialize directly. All providers MUST implement this.
-			// If a provider needs no initialization, its Initialize method should simply return nil.
+			// Call Initialize directly
 			s.Logger.Debug("[%s] Initializing provider...", p.ID())
 			if err := p.Initialize(searchCtx); err != nil {
 				// Check if the error is due to context cancellation
@@ -183,9 +211,14 @@ func (s *Service) SearchAcrossProviders(
 			default:
 			}
 
-			// Call Search directly. All providers MUST implement this.
+			// Call Search
 			s.Logger.Debug("[%s] Executing search...", p.ID())
 			providerResults, err := p.Search(searchCtx, query, options)
+
+			// IMPORTANT: Lock for any mutation of shared state, even in error case
+			mu.Lock()
+			defer mu.Unlock()
+
 			if err != nil {
 				// Check if the error is due to context cancellation/timeout
 				if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
@@ -193,14 +226,22 @@ func (s *Service) SearchAcrossProviders(
 				} else {
 					errorChan <- fmt.Errorf("search error for provider %s: %w", p.ID(), err)
 				}
+
+				// KEY FIX: Store partial results even if there was an error!
+				if len(providerResults) > 0 {
+					s.Logger.Info("[%s] Got %d partial results despite search error",
+						p.ID(), len(providerResults))
+					results[p.ID()] = providerResults
+				}
 				return
 			}
+
 			s.Logger.Debug("[%s] Search returned %d results.", p.ID(), len(providerResults))
 
 			// Add results to the map
-			mu.Lock()
-			results[p.ID()] = providerResults
-			mu.Unlock()
+			if len(providerResults) > 0 {
+				results[p.ID()] = providerResults
+			}
 		}(prov)
 	}
 
@@ -217,14 +258,13 @@ func (s *Service) SearchAcrossProviders(
 		for _, err := range collectedErrors {
 			s.Logger.Warn("- %v", err)
 		}
-		// Optionally return a combined error, e.g., using errors.Join (Go 1.20+)
-		// return results, errors.Join(collectedErrors...)
-		// For now, just logging and returning partial results
+		// Return partial results even with errors
 	} else {
 		s.Logger.Info("Search across providers completed successfully.")
 	}
 
-	return results, nil // Return partial results even if some providers failed
+	// Always return results, even with errors
+	return results, nil
 }
 
 // FilterResults remains unchanged...

@@ -24,7 +24,7 @@ type HTTPService struct {
 
 type RequestOptions struct {
 	Headers         http.Header
-	UserAgent       string
+	UserProvider    string
 	Cookies         []*http.Cookie
 	Referer         string
 	Method          string
@@ -64,9 +64,9 @@ func (h *HTTPService) FetchWithRetries(ctx context.Context, url string, headers 
 		req.Header[k] = v
 	}
 
-	// Set user agent if not already set
-	if _, ok := req.Header["User-Agent"]; !ok && h.RequestOptions.UserAgent != "" {
-		req.Header.Set("User-Agent", h.RequestOptions.UserAgent)
+	// Set user provider if not already set
+	if _, ok := req.Header["User-Provider"]; !ok && h.RequestOptions.UserProvider != "" {
+		req.Header.Set("User-Provider", h.RequestOptions.UserProvider)
 	}
 
 	// Apply cookies if any

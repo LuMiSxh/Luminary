@@ -9,64 +9,64 @@ import (
 	"github.com/spf13/cobra"
 )
 
-var agentsCmd = &cobra.Command{
+var providersCmd = &cobra.Command{
 	Use:   "providers",
 	Short: "List all available manga source providers",
 	Long:  `Display a list of all configured manga source providers that Luminary can use to search and read manga.`,
 	Run: func(cmd *cobra.Command, args []string) {
 		allProviders := appEngine.AllProvider()
 
-		// Sort agents alphabetically
+		// Sort providers alphabetically
 		sort.Slice(allProviders, func(i, j int) bool {
 			return allProviders[i].Name() < allProviders[j].Name()
 		})
 
 		if apiMode {
-			// Create a slice to hold agent data
-			type AgentData struct {
+			// Create a slice to hold provider data
+			type ProviderData struct {
 				ID          string `json:"id"`
 				Name        string `json:"name"`
 				Description string `json:"description"`
 			}
 
-			agentList := make([]AgentData, 0, len(allProviders))
+			providerList := make([]ProviderData, 0, len(allProviders))
 
-			for _, agent := range allProviders {
-				agentData := AgentData{
-					ID:          agent.ID(),
-					Name:        agent.Name(),
-					Description: agent.Description(),
+			for _, provider := range allProviders {
+				providerData := ProviderData{
+					ID:          provider.ID(),
+					Name:        provider.Name(),
+					Description: provider.Description(),
 				}
 
-				agentList = append(agentList, agentData)
+				providerList = append(providerList, providerData)
 			}
 
 			// Output machine-readable JSON using our utility
 			util.OutputJSON("success", map[string]interface{}{
-				"agents": agentList,
+				"providers": providerList,
 			}, nil)
 		} else {
 			// User-friendly output
-			fmt.Println("Available manga source agents:")
+			fmt.Println("Available manga source providers:")
 			fmt.Println("")
 
 			format := "%-12s %-20s %s\n"
 			fmt.Printf(format, "ID", "NAME", "DESCRIPTION")
 			fmt.Println(strings.Repeat("-", 80))
 
-			for _, agent := range allProviders {
+			for _, provider := range allProviders {
 				fmt.Printf(format,
-					agent.ID(),
-					agent.Name(),
-					agent.Description())
+					provider.ID(),
+					provider.Name(),
+					provider.Description())
 			}
 
 			fmt.Println("")
-			fmt.Println("Use --agent flag with the search command to specify a particular agent")
+			fmt.Println("Use --provider flag with the search command to specify a particular provider")
 		}
 	},
 }
 
 func init() {
-	rootCmd.AddCommand(agentsCmd)
+	rootCmd.AddCommand(providersCmd)
 }

@@ -162,7 +162,7 @@ type ProviderError struct {
 }
 
 func (e *ProviderError) Error() string {
-	base := fmt.Sprintf("Agent [%s] error", e.ProviderID)
+	base := fmt.Sprintf("Provider [%s] error", e.ProviderID)
 	if e.ResourceType != "" && e.ResourceID != "" {
 		base = fmt.Sprintf("%s: %s with ID '%s'", base, e.ResourceType, e.ResourceID)
 	}
@@ -186,10 +186,10 @@ func (e *ProviderError) Is(target error) bool {
 	return false
 }
 
-// NewAgentNotFoundError creates a new agent error with not found context
-func NewAgentNotFoundError(agentID, resourceType, resourceID string, err error) error {
+// NewProviderNotFoundError creates a new provider error with not found context
+func NewProviderNotFoundError(providerID, resourceType, resourceID string, err error) error {
 	return &ProviderError{
-		ProviderID:   agentID,
+		ProviderID:   providerID,
 		ResourceType: resourceType,
 		ResourceID:   resourceID,
 		Message:      "not found",

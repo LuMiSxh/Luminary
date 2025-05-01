@@ -21,10 +21,10 @@ import (
 
 // Provider implements the provider.Provider interface for Madara-based sites
 type Provider struct {
-	config     Config
-	htmlAgent  *web.Provider
-	engine     *engine.Engine
-	webScraper *network.WebScraperService
+	config       Config
+	htmlProvider *web.Provider
+	engine       *engine.Engine
+	webScraper   *network.WebScraperService
 }
 
 // NewProvider creates a new Madara-based provider
@@ -38,13 +38,13 @@ func NewProvider(e *engine.Engine, config Config) provider.Provider {
 		Headers:     config.Headers,
 	}
 
-	htmlAgent := web.NewProvider(e, htmlConfig)
+	htmlProvider := web.NewProvider(e, htmlConfig)
 
 	return &Provider{
-		config:     config,
-		htmlAgent:  htmlAgent,
-		engine:     e,
-		webScraper: e.WebScraper,
+		config:       config,
+		htmlProvider: htmlProvider,
+		engine:       e,
+		webScraper:   e.WebScraper,
 	}
 }
 
@@ -55,27 +55,27 @@ func CreateProvider(e *engine.Engine, id, name, siteURL, description string) pro
 
 // ID returns the provider's identifier
 func (p *Provider) ID() string {
-	return p.htmlAgent.ID()
+	return p.htmlProvider.ID()
 }
 
 // Name returns the provider's display name
 func (p *Provider) Name() string {
-	return p.htmlAgent.Name()
+	return p.htmlProvider.Name()
 }
 
 // Description returns the provider's description
 func (p *Provider) Description() string {
-	return p.htmlAgent.Description()
+	return p.htmlProvider.Description()
 }
 
 // SiteURL returns the provider's website URL
 func (p *Provider) SiteURL() string {
-	return p.htmlAgent.SiteURL()
+	return p.htmlProvider.SiteURL()
 }
 
 // Initialize initializes the provider
 func (p *Provider) Initialize(ctx context.Context) error {
-	return p.htmlAgent.Initialize(ctx)
+	return p.htmlProvider.Initialize(ctx)
 }
 
 // FetchMainPage fetches the main page
@@ -818,7 +818,7 @@ func (p *Provider) GetManga(ctx context.Context, id string) (*core.MangaInfo, er
 	}
 
 	// Fetch the manga page
-	page, err := p.htmlAgent.FetchPage(ctx, parser.UrlJoin(p.config.SiteURL, id))
+	page, err := p.htmlProvider.FetchPage(ctx, parser.UrlJoin(p.config.SiteURL, id))
 	if err != nil {
 		return nil, &errors.ProviderError{
 			ProviderID:   p.ID(),
@@ -1183,13 +1183,13 @@ func (p *Provider) GetChapter(ctx context.Context, chapterID string) (*core.Chap
 		chapterURL += "&style=list"
 	}
 
-	page, err := p.htmlAgent.FetchPage(ctx, chapterURL)
+	page, err := p.htmlProvider.FetchPage(ctx, chapterURL)
 
 	// If that fails, try without style=list
 	if err != nil {
 		chapterURL = parser.UrlJoin(p.config.SiteURL, chapterID)
 		cleanChapterUrl := util.CleanImageURL(chapterURL)
-		page, err = p.htmlAgent.FetchPage(ctx, cleanChapterUrl)
+		page, err = p.htmlProvider.FetchPage(ctx, cleanChapterUrl)
 		if err != nil {
 			return nil, &errors.ProviderError{
 				ProviderID:   p.ID(),

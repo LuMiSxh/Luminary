@@ -1,15 +1,15 @@
-# Luminary Agent Implementation Guide
+# Luminary Provider Implementation Guide
 
 > Warning: This document is no longer valid. Please wait for the new version.
 
-This guide explains how to implement a new agent (connector) for Luminary, a manga downloader CLI application. Agents in Luminary are responsible for connecting to specific manga sources or websites and implementing the logic for searching, retrieving, and downloading manga content.
+This guide explains how to implement a new provider (connector) for Luminary, a manga downloader CLI application. Providers in Luminary are responsible for connecting to specific manga sources or websites and implementing the logic for searching, retrieving, and downloading manga content.
 
-## Understanding the Agent Interface
+## Understanding the Provider Interface
 
-All agents must implement the `Agent` interface defined in `engine/types.go`:
+All providers must implement the `Provider` interface defined in `engine/types.go`:
 
 ```go
-type Agent interface {
+type Provider interface {
     ID() string
     Name() string
     Description() string
@@ -25,13 +25,13 @@ type Agent interface {
 }
 ```
 
-## Agent Frameworks in Luminary
+## Provider Frameworks in Luminary
 
-Based on the codebase, Luminary provides three main frameworks to simplify agent implementation:
+Based on the codebase, Luminary provides three main frameworks to simplify provider implementation:
 
-1. **API Framework** (`engine/frameworks/api/api_agent.go`): For sites with RESTful JSON APIs
-2. **HTML Framework** (`engine/frameworks/web/html_agent.go`): For generic HTML scraping-based sites
-3. **Madara Framework** (`engine/frameworks/web/madara_agent.go`): A specialized framework for sites using the Madara WordPress theme
+1. **API Framework** (`engine/frameworks/api/api_provider.go`): For sites with RESTful JSON APIs
+2. **HTML Framework** (`engine/frameworks/web/html_provider.go`): For generic HTML scraping-based sites
+3. **Madara Framework** (`engine/frameworks/web/madara_provider.go`): A specialized framework for sites using the Madara WordPress theme
 
 These frameworks handle common operations and error handling, allowing you to focus on the site-specific details.
 
@@ -43,10 +43,10 @@ Use this approach for sites with a well-defined API that returns structured JSON
 
 #### Step 1: Create a New Package
 
-Create a new package in the `agents` directory:
+Create a new package in the `providers` directory:
 
 ```
-/agents/myservice/agent.go
+/providers/myservice/provider.go
 ```
 
 #### Step 2: Define Response Types
@@ -93,13 +93,13 @@ type SearchResponse struct {
 }
 ```
 
-#### Step 3: Create and Configure Your Agent
+#### Step 3: Create and Configure Your Provider
 
 ```go
-// NewAgent creates a new API-based agent
-func NewAgent(e *engine.Engine) engine.Agent {
-    // Create API agent configuration
-    config := api.APIAgentConfig{
+// NewProvider creates a new API-based provider
+func NewProvider(e *engine.Engine) engine.Provider {
+    // Create API provider configuration
+    config := api.APIProviderConfig{
         // Basic identity
         ID:          "mys",              // Short identifier (2-3 chars)
         Name:        "My Service",       // Display name
@@ -113,7 +113,7 @@ func NewAgent(e *engine.Engine) engine.Agent {
         ThrottleTime: 2 * time.Second,
 
         DefaultHeaders: map[string]string{
-            "User-Agent": "Luminary/1.0",
+            "User-Provider": "Luminary/1.0",
             "Referer":    "https://myservice.com",
         },
 
@@ -174,8 +174,8 @@ func NewAgent(e *engine.Engine) engine.Agent {
     // Configure extractors
     config.ExtractorSets = configureExtractors()
 
-    // Create and return the API agent
-    return api.NewAPIAgent(e, config)
+    // Create and return the API provider
+    return api.NewAPIProvider(e, config)
 }
 ```
 
@@ -256,7 +256,7 @@ func processChapterResponse(response interface{}, chapterID string) (interface{}
 }
 
 // processChapters processes chapter list responses
-func processChapters(ctx context.Context, agent *api.APIAgent, response interface{}, mangaID string) ([]engine.ChapterInfo, bool, error) {
+func processChapters(ctx context.Context, provider *api.APIProvider, response interface{}, mangaID string) ([]engine.ChapterInfo, bool, error) {
     // Process the chapter list response
     // ...
 
@@ -334,7 +334,7 @@ func configureExtractors() map[string]engine.ExtractorSet {
 
 For sites without a structured API, use the HTML framework for web scraping:
 
-#### Step 1: Create Agent Package and Basic Setup
+#### Step 1: Create Provider Package and Basic Setup
 
 ```go
 package myscraper
@@ -346,32 +346,32 @@ import (
     "strings"
 )
 
-// MyScraper implements a scraping-based agent
+// MyScraper implements a scraping-based provider
 type MyScraper struct {
-    htmlAgent  *web.HTMLAgent
+    htmlProvider  *web.HTMLProvider
     engine     *engine.Engine
     webScraper *engine.WebScraperService
 }
 
-// NewAgent creates a new scraper-based agent
-func NewAgent(e *engine.Engine) engine.Agent {
-    // Create HTML agent config
-    htmlConfig := web.HTMLAgentConfig{
+// NewProvider creates a new scraper-based provider
+func NewProvider(e *engine.Engine) engine.Provider {
+    // Create HTML provider config
+    htmlConfig := web.HTMLProviderConfig{
         ID:          "msc",
         Name:        "My Scraper",
         SiteURL:     "https://myscraper.com",
         Description: "My manga scraper site",
         Headers: map[string]string{
-            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36",
+            "User-Provider": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36",
             "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8",
         },
     }
 
-    // Create HTML agent
-    htmlAgent := web.NewHTMLAgent(e, htmlConfig)
+    // Create HTML provider
+    htmlProvider := web.NewHTMLProvider(e, htmlConfig)
 
     return &MyScraper{
-        htmlAgent:  htmlAgent,
+        htmlProvider:  htmlProvider,
         engine:     e,
         webScraper: e.WebScraper,
     }
@@ -381,12 +381,12 @@ func NewAgent(e *engine.Engine) engine.Agent {
 #### Step 2: Implement Basic Methods
 
 ```go
-// Identity methods - delegate to the HTML agent
-func (m *MyScraper) ID() string { return m.htmlAgent.ID() }
-func (m *MyScraper) Name() string { return m.htmlAgent.Name() }
-func (m *MyScraper) Description() string { return m.htmlAgent.Description() }
-func (m *MyScraper) SiteURL() string { return m.htmlAgent.SiteURL() }
-func (m *MyScraper) Initialize(ctx context.Context) error { return m.htmlAgent.Initialize(ctx) }
+// Identity methods - delegate to the HTML provider
+func (m *MyScraper) ID() string { return m.htmlProvider.ID() }
+func (m *MyScraper) Name() string { return m.htmlProvider.Name() }
+func (m *MyScraper) Description() string { return m.htmlProvider.Description() }
+func (m *MyScraper) SiteURL() string { return m.htmlProvider.SiteURL() }
+func (m *MyScraper) Initialize(ctx context.Context) error { return m.htmlProvider.Initialize(ctx) }
 ```
 
 #### Step 3: Implement Web Scraping Logic
@@ -403,7 +403,7 @@ func (m *MyScraper) Search(ctx context.Context, query string, options engine.Sea
     }
     
     // Fetch search page
-    page, err := m.htmlAgent.FetchPage(ctx, searchURL)
+    page, err := m.htmlProvider.FetchPage(ctx, searchURL)
     if err != nil {
         return nil, fmt.Errorf("failed to fetch search page: %w", err)
     }
@@ -454,7 +454,7 @@ func (m *MyScraper) GetManga(ctx context.Context, id string) (*engine.MangaInfo,
     mangaURL := engine.UrlJoin(m.SiteURL(), id)
     
     // Fetch manga page
-    page, err := m.htmlAgent.FetchPage(ctx, mangaURL)
+    page, err := m.htmlProvider.FetchPage(ctx, mangaURL)
     if err != nil {
         return nil, fmt.Errorf("failed to fetch manga page: %w", err)
     }
@@ -609,9 +609,9 @@ import (
     "Luminary/engine/frameworks/web"
 )
 
-// NewAgent creates a new Madara-based agent
-func NewAgent(e *engine.Engine) engine.Agent {
-    // Configure Madara agent
+// NewProvider creates a new Madara-based provider
+func NewProvider(e *engine.Engine) engine.Provider {
+    // Configure Madara provider
     config := web.MadaraConfig{
         ID:              "mmd",
         Name:            "My Madara Site",
@@ -621,7 +621,7 @@ func NewAgent(e *engine.Engine) engine.Agent {
         ChapterSelector: "li.wp-manga-chapter > a, .chapter-link",
         PageSelector:    "div.page-break source, div.page-break img, .reading-content img",
         Headers: map[string]string{
-            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36",
+            "User-Provider": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36",
             "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8",
             "Referer": "https://mymadara.com/",
         },
@@ -630,35 +630,35 @@ func NewAgent(e *engine.Engine) engine.Agent {
         CustomLoadAction: "madara_load_more",
     }
 
-    // Create and return the Madara agent
-    return web.NewMadaraAgent(e, config)
+    // Create and return the Madara provider
+    return web.NewMadaraProvider(e, config)
 }
 ```
 
-## Registering Your Agent
+## Registering Your Provider
 
-Once you've implemented your agent, register it with the engine in `main.go`:
+Once you've implemented your provider, register it with the engine in `main.go`:
 
 ```go
 // In main.go
-func registerAgents(e *engine.Engine) {
-    // Register existing agents
-    err := e.RegisterAgent(mangadex.NewAgent(e))
+func registerProviders(e *engine.Engine) {
+    // Register existing providers
+    err := e.RegisterProvider(mangadex.NewProvider(e))
     if err != nil {
-        e.Logger.Error("Failed to register MangaDex agent: %v", err)
+        e.Logger.Error("Failed to register MangaDex provider: %v", err)
     }
     
-    // Register your new agent
-    err = e.RegisterAgent(myservice.NewAgent(e))
+    // Register your new provider
+    err = e.RegisterProvider(myservice.NewProvider(e))
     if err != nil {
-        e.Logger.Error("Failed to register MyService agent: %v", err)
+        e.Logger.Error("Failed to register MyService provider: %v", err)
     }
 }
 ```
 
 ## Best Practices
 
-1. **Error Handling**: Use the framework's built-in error handling where possible. The common helper functions in `engine/frameworks/common/agent_helpers.go` wrap errors with agent context.
+1. **Error Handling**: Use the framework's built-in error handling where possible. The common helper functions in `engine/frameworks/common/provider_helpers.go` wrap errors with provider context.
 
 2. **Logging**: Use the engine's logger (`e.Logger`) for consistent logging:
    ```go
@@ -683,7 +683,7 @@ func registerAgents(e *engine.Engine) {
    defer cancel()
    ```
 
-6. **CSS Selectors**: For HTML-based agents, use multiple selector options for robustness:
+6. **CSS Selectors**: For HTML-based providers, use multiple selector options for robustness:
    ```go
    titleSelectors := []string{".manga-title", "h1.title", ".entry-title"}
    for _, selector := range titleSelectors {
@@ -695,7 +695,7 @@ func registerAgents(e *engine.Engine) {
 
 ## Engine Services Reference
 
-The Luminary engine provides several services that your agent can use:
+The Luminary engine provides several services that your provider can use:
 
 | Service     | Purpose            | Key Methods                                    |
 |-------------|--------------------|------------------------------------------------|
@@ -712,18 +712,18 @@ The Luminary engine provides several services that your agent can use:
 
 ## Examples
 
-### API-based Agent: MangaDex
+### API-based Provider: MangaDex
 
-The MangaDex agent (`agents/mangadex/agent.go`) provides a comprehensive example of an API-based agent that:
+The MangaDex provider (`providers/mangadex/provider.go`) provides a comprehensive example of an API-based provider that:
 - Defines API endpoints and response types
 - Creates extractors for mapping JSON to domain models
 - Handles pagination for chapter listing
 - Implements custom processing for chapter pages
 
-### HTML-based Agent: Generic Scraper
+### HTML-based Provider: Generic Scraper
 
-A generic HTML-based agent would use the HTML framework and implement custom scraping logic for each site's specific HTML structure.
+A generic HTML-based provider would use the HTML framework and implement custom scraping logic for each site's specific HTML structure.
 
-### Madara-based Agent: KissManga
+### Madara-based Provider: KissManga
 
-The KissManga agent (`agents/kissmanga/agent.go`) shows how to quickly implement an agent for a Madara-based site by customizing the configuration.
+The KissManga provider (`providers/kissmanga/provider.go`) shows how to quickly implement an provider for a Madara-based site by customizing the configuration.

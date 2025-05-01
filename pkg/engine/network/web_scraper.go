@@ -236,8 +236,8 @@ func (s *WebScraperService) FetchPage(ctx context.Context, req *ScraperRequest) 
 	}
 
 	// Add default headers if not set
-	if httpReq.Header.Get("User-Agent") == "" {
-		httpReq.Header.Set("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/92.0.4515.131 Safari/537.36")
+	if httpReq.Header.Get("User-Provider") == "" {
+		httpReq.Header.Set("User-Provider", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/92.0.4515.131 Safari/537.36")
 	}
 
 	if httpReq.Header.Get("Accept") == "" {

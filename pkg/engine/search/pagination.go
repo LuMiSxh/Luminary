@@ -80,6 +80,14 @@ func (p *PaginationService) FetchAllPages(ctx context.Context, params PaginatedR
 		pageSize = params.Config.MaxLimit
 	}
 
+	// Log pagination settings
+	if unlimitedPages {
+		p.Logger.Info("Pagination: Unlimited pages mode enabled (will fetch all available pages)")
+	} else {
+		p.Logger.Info("Pagination: Will fetch up to %d pages", maxPages)
+	}
+	p.Logger.Info("Pagination: Using page size of %d items", pageSize)
+
 	// Determine pagination strategy
 	var currentPage int
 	var currentOffset int
@@ -90,9 +98,11 @@ func (p *PaginationService) FetchAllPages(ctx context.Context, params PaginatedR
 		if currentPage <= 0 {
 			currentPage = 1 // Default start page
 		}
+		p.Logger.Debug("Pagination: Using page-based pagination with param '%s'", params.Config.PageParam)
 	} else {
 		// Offset-based pagination
 		currentOffset = params.Config.StartOffset
+		p.Logger.Debug("Pagination: Using offset-based pagination with param '%s'", params.Config.OffsetParam)
 	}
 
 	// Keep track of whether there might be more results
@@ -138,6 +148,7 @@ func (p *PaginationService) FetchAllPages(ctx context.Context, params PaginatedR
 		// Extract items from the response
 		items, err := p.getItemsFromResponse(response, params.Config.ItemsPath)
 		if err != nil {
+			p.Logger.Warn("Failed to extract items using path %v: %v", params.Config.ItemsPath, err)
 			return nil, fmt.Errorf("failed to extract items from page %d: %w", page+1, err)
 		}
 
@@ -165,6 +176,8 @@ func (p *PaginationService) FetchAllPages(ctx context.Context, params PaginatedR
 
 		// Determine if there are more pages to fetch
 		hasMore = p.hasMorePages(response, params.Config, itemCount, pageSize)
+		p.Logger.Debug("Page %d complete, hasMore = %v, total results so far: %d",
+			page+1, hasMore, len(allResults))
 
 		// Update page/offset for next request
 		if params.Config.PageParam != "" {
@@ -243,9 +256,11 @@ func (p *PaginationService) hasMorePages(response interface{}, config Pagination
 				totalCount = int(v)
 			default:
 				// Couldn't determine total count, fall back to other methods
+				p.Logger.Debug("Found totalCount but couldn't convert type %T to int", totalCountValue)
 			}
 
 			if totalCount > 0 {
+				p.Logger.Debug("Total count from API: %d", totalCount)
 				if config.PageParam != "" {
 					// Page-based: check if current page * pageSize < totalCount
 					currentPage := p.getCurrentPage(response, config)
@@ -256,11 +271,22 @@ func (p *PaginationService) hasMorePages(response interface{}, config Pagination
 					return currentOffset+itemCount < totalCount
 				}
 			}
+		} else if err != nil {
+			p.Logger.Debug("Failed to get total count from path %v: %v", config.TotalCountPath, err)
 		}
 	}
 
-	// Fallback: if we got fewer items than the page size, assume no more pages
-	return itemCount >= pageSize && itemCount > 0
+	// fallback: if we got items and the count equals the requested page size,
+	// there's a good chance there are more items available
+	if itemCount > 0 {
+		hasMore := itemCount >= pageSize
+		p.Logger.Debug("Using fallback logic: got %d items (page size %d) -> has more: %v",
+			itemCount, pageSize, hasMore)
+		return hasMore
+	}
+
+	// No items returned
+	return false
 }
 
 // getCurrentPage extracts the current page number from the response

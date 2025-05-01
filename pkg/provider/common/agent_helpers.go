@@ -13,23 +13,23 @@ import (
 	"time"
 )
 
-// ExecuteInitialize handles common agent initialization logic
-func ExecuteInitialize(ctx context.Context, e *engine.Engine, providerID, agentName string, initFunc func(context.Context) error) error {
+// ExecuteInitialize handles common provider initialization logic
+func ExecuteInitialize(ctx context.Context, e *engine.Engine, providerID, providerName string, initFunc func(context.Context) error) error {
 	// Log initialization
-	e.Logger.Info("Initializing agent: %s (%s)", agentName, providerID)
+	e.Logger.Info("Initializing provider: %s (%s)", providerName, providerID)
 
-	// Call the agent-specific initialization
+	// Call the provider-specific initialization
 	err := initFunc(ctx)
 	if err != nil {
-		e.Logger.Error("Failed to initialize agent %s: %v", providerID, err)
+		e.Logger.Error("Failed to initialize provider %s: %v", providerID, err)
 		return &errors.ProviderError{
 			ProviderID: providerID,
-			Message:    "Failed to initialize agent",
+			Message:    "Failed to initialize provider",
 			Err:        err,
 		}
 	}
 
-	e.Logger.Info("Agent initialized: %s", providerID)
+	e.Logger.Info("Provider initialized: %s", providerID)
 	return nil
 }
 
@@ -88,10 +88,10 @@ func ExecuteGetManga(
 	if err != nil {
 		// Check for not found error specifically
 		if errors.IsNotFound(err) {
-			return nil, errors.NewAgentNotFoundError(providerID, "manga", mangaID, err)
+			return nil, errors.NewProviderNotFoundError(providerID, "manga", mangaID, err)
 		}
 
-		// For other errors, wrap with agent context
+		// For other errors, wrap with provider context
 		return nil, &errors.ProviderError{
 			ProviderID:   providerID,
 			ResourceType: "manga",
@@ -176,10 +176,10 @@ func ExecuteGetChapter(
 	if err != nil {
 		// Check for not found error specifically
 		if errors.IsNotFound(err) {
-			return nil, errors.NewAgentNotFoundError(providerID, "chapter", chapterID, err)
+			return nil, errors.NewProviderNotFoundError(providerID, "chapter", chapterID, err)
 		}
 
-		// For other errors, wrap with agent context
+		// For other errors, wrap with provider context
 		return nil, &errors.ProviderError{
 			ProviderID:   providerID,
 			ResourceType: "chapter",
@@ -189,7 +189,7 @@ func ExecuteGetChapter(
 		}
 	}
 
-	// Process the response with agent-specific logic
+	// Process the response with provider-specific logic
 	if processFunc != nil {
 		chapter, err := processFunc(response, chapterID)
 		if err != nil {
@@ -236,7 +236,7 @@ func ExecuteDownloadChapter(
 	ctx context.Context,
 	e *engine.Engine,
 	providerID string,
-	agentName string,
+	providerName string,
 	chapterID string,
 	destDir string,
 	getChapterFunc func(context.Context, string) (*core.Chapter, error),
@@ -268,7 +268,7 @@ func ExecuteDownloadChapter(
 	} else {
 		// Fall back to using chapter title
 		e.Logger.Debug("[%s] Couldn't find manga for chapter %s, using fallback title", providerID, chapterID)
-		mangaTitle = fmt.Sprintf("%s-%s", agentName, chapterID)
+		mangaTitle = fmt.Sprintf("%s-%s", providerName, chapterID)
 	}
 
 	// Extract chapter and volume numbers

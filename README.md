@@ -146,7 +146,7 @@ You can also open an issue if you find a bug or have a feature request.
 ### Adding a New Provider
 
 Luminary supports adding new manga sources through its provider interface. For more information, see
-the [Provider Implementation Guide](internal/providers/AGENT.md).
+the [Provider Implementation Guide](internal/providers/provider.md).
 
 ```go
 // Example: Simplified provider implementation

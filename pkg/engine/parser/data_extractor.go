@@ -82,27 +82,39 @@ func (e *ExtractorService) ExtractList(extractorSet ExtractorSet, responseData i
 	// Extract the list from the response
 	listData, err := e.GetValueFromPath(responseData, listPath)
 	if err != nil {
+		e.Logger.Warn("Failed to extract list data from path %v: %v", listPath, err)
 		return nil, fmt.Errorf("failed to extract list data: %w", err)
 	}
 
 	// Ensure it's a slice
 	listValue := reflect.ValueOf(listData)
 	if listValue.Kind() != reflect.Slice {
+		e.Logger.Warn("Expected slice at path %v, got %T", listPath, listData)
 		return nil, fmt.Errorf("expected slice, got %T", listData)
 	}
 
+	e.Logger.Debug("Found %d items at path %v", listValue.Len(), listPath)
+
 	// Extract each item
-	results := make([]interface{}, listValue.Len())
+	var results []interface{}
+	var extractErrors int
+
 	for i := 0; i < listValue.Len(); i++ {
 		item := listValue.Index(i).Interface()
 		result, err := e.Extract(extractorSet, item)
 		if err != nil {
 			e.Logger.Warn("Failed to extract item %d: %v", i, err)
+			extractErrors++
 			continue
 		}
-		results[i] = result
+		results = append(results, result)
 	}
 
+	if extractErrors > 0 {
+		e.Logger.Warn("Failed to extract %d out of %d items", extractErrors, listValue.Len())
+	}
+
+	e.Logger.Debug("Successfully extracted %d items", len(results))
 	return results, nil
 }
 

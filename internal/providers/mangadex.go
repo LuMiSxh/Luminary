@@ -8,6 +8,7 @@ import (
 	"Luminary/pkg/engine/search"
 	"Luminary/pkg/provider"
 	"Luminary/pkg/provider/api"
+	"Luminary/pkg/provider/common"
 	"context"
 	"fmt"
 	"net/url"
@@ -80,8 +81,11 @@ type MgdChapterListResp struct {
 }
 
 type MgdSearchResp struct {
-	Data []struct {
+	Result   string `json:"result"`
+	Response string `json:"response"`
+	Data     []struct {
 		ID         string `json:"id"`
+		Type       string `json:"type"`
 		Attributes struct {
 			Title       map[string]string   `json:"title"`
 			AltTitles   []map[string]string `json:"altTitles"`
@@ -101,6 +105,9 @@ type MgdSearchResp struct {
 			} `json:"attributes"`
 		} `json:"relationships"`
 	} `json:"data"`
+	Limit  int `json:"limit"`
+	Offset int `json:"offset"`
+	Total  int `json:"total"`
 }
 
 // MangaDexState holds MangaDex-specific data
@@ -108,27 +115,24 @@ type MangaDexState struct {
 	ServerNetwork []string
 }
 
-// MangadexProvider is the main struct for the MangaDex agent
+// MangadexProvider is the main struct for the MangaDex provider
 type MangadexProvider struct {
 	*api.Provider
 	state  *MangaDexState
 	engine *engine.Engine
 }
 
-// Initialize overrides the base agent's Initialize method
+// Initialize overrides the base provider's Initialize method
 func (m *MangadexProvider) Initialize(ctx context.Context) error {
-	// Call the parent Initialize method
-	if err := m.Initialize(ctx); err != nil {
-		return err
-	}
-
-	// Add our custom network seed
-	m.state.ServerNetwork = append(m.state.ServerNetwork, "https://cache.ayaya.red/mdah/data/")
-	m.engine.Logger.Info("Added network seeds '[ %s ]' to %s", strings.Join(m.state.ServerNetwork, ", "), m.Name())
-	return nil
+	return common.ExecuteInitialize(ctx, m.engine, m.ID(), m.Name(), func(ctx context.Context) error {
+		// Add our custom network seed
+		m.state.ServerNetwork = append(m.state.ServerNetwork, "https://cache.ayaya.red/mdah/data/")
+		m.engine.Logger.Info("Added network seeds '[ %s ]' to %s", strings.Join(m.state.ServerNetwork, ", "), m.Name())
+		return nil
+	})
 }
 
-// NewMangadexProvider creates a new MangaDex agent
+// NewMangadexProvider creates a new MangaDex provider
 func NewMangadexProvider(e *engine.Engine) provider.Provider {
 	// Create state with initial server network
 	state := &MangaDexState{
@@ -137,7 +141,7 @@ func NewMangadexProvider(e *engine.Engine) provider.Provider {
 		},
 	}
 
-	// Create API agent configuration
+	// Create API provider configuration
 	config := api.Config{
 		// Basic identity
 		ID:          "mgd",
@@ -222,22 +226,22 @@ func NewMangadexProvider(e *engine.Engine) provider.Provider {
 	// Configure extractors
 	config.ExtractorSets = configureExtractors()
 
-	// Create the API agent
+	// Create the API provider
 	baseMangadexProvider := api.NewProvider(e, config)
 
-	// Create our custom agent
-	agent := &MangadexProvider{
+	// Create our custom provider
+	prov := &MangadexProvider{
 		Provider: baseMangadexProvider.(*api.Provider),
 		state:    state,
 		engine:   e,
 	}
 
-	return agent
+	return prov
 }
 
 // processChapters creates a function to process chapter responses
 func processChapters(state *MangaDexState) api.ProcessChaptersFunc {
-	return func(ctx context.Context, agent *api.Provider, response interface{}, mangaID string) ([]core.ChapterInfo, bool, error) {
+	return func(ctx context.Context, provider *api.Provider, response interface{}, mangaID string) ([]core.ChapterInfo, bool, error) {
 		// Cast to the expected response type
 		chaptersResp, ok := response.(*MgdChapterListResp)
 		if !ok {
@@ -338,7 +342,7 @@ func createChapterProcessor(e *engine.Engine, state *MangaDexState) api.Response
 			BaseURL:      "https://api.mangadex.org",
 			RateLimitKey: "api.mangadex.org",
 			RetryCount:   3,
-			ThrottleTime: 2 * time.Second,
+			ThrottleTime: 3 * time.Second,
 			DefaultHeaders: map[string]string{
 				"User-MangadexProvider": "Luminary/1.0",
 				"Referer":               "https://mangadex.org",
@@ -403,12 +407,12 @@ func formatSearchQuery(params interface{}) url.Values {
 			queryParams.Set("title", opts.Query)
 		}
 
-		// Set limit
+		// Set limit - critical fix: Use the ACTUAL limit from pagination
 		if opts.Limit > 0 {
 			queryParams.Set("limit", strconv.Itoa(opts.Limit))
 		} else {
-			// If limit=0, request the maximum page size
-			queryParams.Set("limit", "100") // Maximum allowed
+			// For unlimited results, use maximum allowed by MangaDex (100)
+			queryParams.Set("limit", "100")
 		}
 
 		// Apply sorting
@@ -421,6 +425,9 @@ func formatSearchQuery(params interface{}) url.Values {
 			case "name":
 				queryParams.Set("order[title]", "asc")
 			}
+		} else {
+			// Default sort by relevance
+			queryParams.Set("order[relevance]", "desc")
 		}
 
 		// Apply filters

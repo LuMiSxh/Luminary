@@ -31,7 +31,7 @@ type Engine struct {
 	Search      *search.Service
 	WebScraper  *network.WebScraperService
 
-	// Agent registry
+	// Provider registry
 	providers     map[string]provider.Provider
 	providerMutex sync.RWMutex
 }
@@ -59,10 +59,7 @@ func New() *Engine {
 	}
 
 	// Create logger service first so we can use it in other services
-	loggerService := &logger.Service{
-		Verbose: false,
-		LogFile: logFile,
-	}
+	loggerService := logger.NewService(logFile)
 
 	// Create HTTP service with logger
 	httpService := &network.HTTPService{
@@ -77,7 +74,7 @@ func New() *Engine {
 		},
 		RequestOptions: network.RequestOptions{
 			Headers:         make(http.Header),
-			UserAgent:       "Luminary/1.0",
+			UserProvider:    "Luminary/1.0",
 			Method:          "GET",
 			FollowRedirects: true,
 		},
@@ -102,11 +99,6 @@ func New() *Engine {
 
 	// Create rate limiter service
 	rateLimiterService := network.NewRateLimiterService(2 * time.Second)
-
-	// Configure rate limiters for common sites
-	rateLimiterService.SetLimit("api.mangadex.org", 2*time.Second)
-	rateLimiterService.SetLimit("mangadex.org", 1*time.Second)
-	rateLimiterService.SetLimit("kissmanga.in", 2*time.Second)
 
 	// Create DOM service
 	domService := &parser.DOMService{}

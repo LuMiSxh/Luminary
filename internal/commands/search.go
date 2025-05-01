@@ -173,24 +173,24 @@ func calculateTimeout(limit, pages int, multipleProviders bool) time.Duration {
 
 	// Adjust for pagination parameters
 	if limit == 0 || pages == 0 {
-		// For unlimited requests, start with a higher base timeout
-		timeoutDuration = 5 * time.Minute
+		// For unlimited requests, use a much higher base timeout
+		timeoutDuration = 15 * time.Minute // Increased from 5 to 15 minutes
 
 		// If both are unlimited, use a maximum timeout
 		if limit == 0 && pages == 0 {
-			timeoutDuration = 10 * time.Minute
+			timeoutDuration = 30 * time.Minute // Increased from 10 to 30 minutes
 		}
 	} else if pages > 3 || limit > 50 {
 		// For larger paginated requests
-		timeoutDuration = 3 * time.Minute
+		timeoutDuration = 5 * time.Minute // Increased from 3 to 5 minutes
 
 		// Scale with number of pages
 		if pages > 5 {
 			pageTimeoutFactor := time.Duration(pages) / 5
 			if pageTimeoutFactor > 1 {
-				extraTimeout := pageTimeoutFactor * time.Minute
-				if extraTimeout > 5*time.Minute {
-					extraTimeout = 5 * time.Minute // Cap at 5 extra minutes
+				extraTimeout := pageTimeoutFactor * 2 * time.Minute // Doubled the extra time per page
+				if extraTimeout > 10*time.Minute {
+					extraTimeout = 10 * time.Minute // Cap at 10 extra minutes (increased from 5)
 				}
 				timeoutDuration += extraTimeout
 			}
@@ -199,7 +199,7 @@ func calculateTimeout(limit, pages int, multipleProviders bool) time.Duration {
 
 	// Add extra time if querying multiple providers
 	if multipleProviders {
-		timeoutDuration += 2 * time.Minute
+		timeoutDuration += 5 * time.Minute // Increased from 2 to 5 minutes
 	}
 
 	return timeoutDuration
@@ -317,7 +317,7 @@ func init() {
 	// Flags
 	searchCmd.Flags().StringVar(&searchProvider, "provider", "", "Search using specific provider")
 	searchCmd.Flags().IntVar(&searchLimit, "limit", 10, "Limit number of results per page")
-	searchCmd.Flags().IntVar(&searchPages, "pages", 1, "Number of pages to fetch (0 for all pages)")
+	searchCmd.Flags().IntVar(&searchPages, "pages", 1, "Number of pages to fetch")
 	searchCmd.Flags().StringVar(&searchSort, "sort", "relevance", "Sort by (relevance, name, newest, updated)")
 	searchCmd.Flags().StringSliceVar(&searchFields, "fields", []string{}, "Fields to search in (title, author, genre), empty means all")
 	searchCmd.Flags().BoolVar(&includeAltTitles, "alt-titles", true, "Include alternative titles in search")
