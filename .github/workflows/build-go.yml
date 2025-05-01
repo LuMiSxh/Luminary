@@ -67,7 +67,7 @@ jobs:
           GOOS: ${{ steps.parse-target.outputs.os }}
           GOARCH: ${{ steps.parse-target.outputs.arch }}
         run: |
-          go build -o ${{ matrix.output_name }} -ldflags "-X main.Version=${{ github.event.inputs.version }}" -v .
+          go build -o ${{ matrix.output_name }} -ldflags "-X github.com/lumisxh/luminary/cmd/luminary.Version=${{ github.event.inputs.version }}" -v ./cmd/luminary
 
       - name: Create release archive for Linux/macOS
         if: ${{ steps.parse-target.outputs.os != 'windows' }}

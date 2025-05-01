@@ -1,0 +1,375 @@
+package display
+
+import (
+	"Luminary/pkg/engine/core"
+	"Luminary/pkg/provider"
+	"Luminary/pkg/util"
+	"fmt"
+	"sort"
+	"strings"
+)
+
+// Level defines the level of detail for displaying information
+type Level int
+
+const (
+	// Minimal shows only the most basic information (e.g., Title, ID)
+	Minimal Level = iota
+	// Standard shows common information (e.g., Title, ID, Authors, Tags/AltTitles)
+	Standard
+	// Detailed shows all available information
+	Detailed
+)
+
+// Options controls how information is displayed
+type Options struct {
+	Level            Level  // Detail level
+	IncludeAltTitles bool   // Whether to include alternative titles (only if Level >= Standard)
+	ShowTags         bool   // Whether to show tags (only if Level >= Standard)
+	ItemLimit        int    // Maximum number of items (tags, alt titles) to display (0 = all)
+	Indent           string // Base indentation string (e.g., "  ")
+	Prefix           string // Prefix for the primary line (e.g., "- ")
+	// Note: Detail lines will automatically get an additional indent level.
+}
+
+// DefaultDisplayOptions returns the default display options
+func DefaultDisplayOptions() Options {
+	return Options{
+		Level:            Standard,
+		IncludeAltTitles: true,
+		ShowTags:         true,
+		ItemLimit:        5,
+		Indent:           "  ",
+		Prefix:           "",
+	}
+}
+
+// --- Helper Functions ---
+
+// appendLine adds a formatted line to the strings.Builder with appropriate prefix and indentation.
+// indentLevel 0 = base indent, indentLevel 1 = one extra indent, etc.
+func appendLine(sb *strings.Builder, options Options, indentLevel int, format string, args ...interface{}) {
+	totalIndent := options.Indent + strings.Repeat(options.Indent, indentLevel)
+	line := fmt.Sprintf(format, args...)
+	sb.WriteString(fmt.Sprintf("%s%s%s\n", options.Prefix, totalIndent, line))
+}
+
+// formatLimitedList formats a slice of strings with a label and an optional limit.
+// Returns an empty string if items is empty.
+func formatLimitedList(label string, items []string, limit int) string {
+	if len(items) == 0 {
+		return ""
+	}
+
+	// Deduplicate for display (useful for AltTitles)
+	uniqueMap := make(map[string]struct{})
+	var displayItems []string
+	for _, item := range items {
+		if _, exists := uniqueMap[item]; !exists {
+			uniqueMap[item] = struct{}{}
+			displayItems = append(displayItems, item)
+		}
+	}
+
+	if len(displayItems) == 0 { // Should not happen if items was not empty, but safety check
+		return ""
+	}
+
+	limitedItems := displayItems
+	suffix := ""
+	if limit > 0 && len(displayItems) > limit {
+		limitedItems = displayItems[:limit]
+		suffix = fmt.Sprintf(" (and %d more)", len(displayItems)-limit)
+	}
+
+	return fmt.Sprintf("%s: %s%s", label, strings.Join(limitedItems, ", "), suffix)
+}
+
+// --- Primary Formatting Functions ---
+
+// Manga formats and prints manga information according to the specified options
+func Manga(manga core.Manga, provider provider.Provider, options Options) string {
+	var output strings.Builder
+	mangaID := core.FormatMangaID(provider.ID(), manga.ID)
+
+	// Line 1: Title and ID (always shown)
+	appendLine(&output, options, 0, "%s (ID: %s)", manga.Title, mangaID)
+
+	// Detail lines (indented) - only if Level > Minimal
+	if options.Level >= Standard {
+		// Authors
+		if len(manga.Authors) > 0 {
+			appendLine(&output, options, 1, "Authors: %s", strings.Join(manga.Authors, ", "))
+		}
+
+		// Alternative titles (if enabled and available)
+		if options.IncludeAltTitles {
+			altTitleStr := formatLimitedList("Also known as", manga.AltTitles, options.ItemLimit)
+			if altTitleStr != "" {
+				appendLine(&output, options, 1, altTitleStr)
+			}
+		}
+
+		// Tags (if enabled and available)
+		if options.ShowTags {
+			tagStr := formatLimitedList("Tags", manga.Tags, options.ItemLimit)
+			if tagStr != "" {
+				appendLine(&output, options, 1, tagStr)
+			}
+		}
+	}
+
+	// More detail lines (indented) - only if Level >= Detailed
+	if options.Level >= Detailed {
+		// Status
+		if manga.Status != "" {
+			appendLine(&output, options, 1, "Status: %s", manga.Status)
+		}
+
+		// Description
+		if manga.Description != "" {
+			desc := manga.Description
+			// Basic truncation for very long descriptions in list views etc.
+			if len(desc) > 300 {
+				desc = desc[:300] + "..."
+			}
+			// Replace newlines in description for compact display
+			desc = strings.ReplaceAll(desc, "\n", " ")
+			appendLine(&output, options, 1, "Description: %s", desc)
+		}
+	}
+
+	return output.String()
+}
+
+// Chapter formats and prints chapter information according to the specified options
+func Chapter(chapter core.ChapterInfo, providerID string, options Options) string {
+	var output strings.Builder
+	chapterID := core.FormatMangaID(providerID, chapter.ID)
+
+	// Line 1: Title and ID (always shown)
+	title := chapter.Title
+	if title == "" {
+		title = fmt.Sprintf("Chapter %g", chapter.Number) // Fallback title
+	}
+	appendLine(&output, options, 0, "%s (ID: %s)", title, chapterID)
+
+	// Detail lines (indented) - Chapter details are usually minimal or standard
+	// We always show Chapter Number and Date if available, regardless of Level
+	// as they are fundamental to a chapter.
+
+	// Format date
+	dateStr := "Unknown date"
+	if !chapter.Date.IsZero() {
+		dateStr = util.FormatDate(chapter.Date)
+	}
+
+	// Format chapter number
+	chapterNum := "?"
+	if chapter.Number > 0 {
+		chapterNum = fmt.Sprintf("%g", chapter.Number) // Use %g for clean number formatting
+	}
+
+	appendLine(&output, options, 1, "Chapter %s | Released: %s", chapterNum, dateStr)
+
+	// Potentially add Scanlation Group if Level is Detailed and field exists
+	// if options.Level >= Detailed && chapter.ScanlationGroup != "" {
+	//     appendLine(&output, options, 1, "Group: %s", chapter.ScanlationGroup)
+	// }
+
+	return output.String()
+}
+
+// MangaInfo formats and prints detailed manga information including chapters.
+// It uses Standard options for the main manga details by default, but can be customized.
+func MangaInfo(manga *core.MangaInfo, provider provider.Provider, mainOptions Options) string {
+	var output strings.Builder
+
+	// --- Manga Details Section ---
+	// Use the Manga formatter for the main details, ensuring Detailed level for full info.
+	// Override prefix/indent for this specific section header if needed, or use defaults.
+	mangaCore := core.Manga{ // Adapt MangaInfo to Manga struct for the formatter
+		ID:          manga.ID,
+		Title:       manga.Title,
+		AltTitles:   manga.AltTitles,
+		Description: manga.Description,
+		Authors:     manga.Authors,
+		Status:      manga.Status,
+		Tags:        manga.Tags,
+	}
+	// Force detailed level for MangaInfo display, but respect other options like limits
+	infoOptions := mainOptions
+	infoOptions.Level = Detailed
+	infoOptions.Prefix = ""   // No prefix for the main block
+	infoOptions.Indent = ""   // No base indent for the main block
+	infoOptions.ItemLimit = 0 // Show all tags/alt-titles in detailed view
+
+	output.WriteString("--- Manga Details ---\n")
+	mangaDetails := Manga(mangaCore, provider, infoOptions)
+	// Manually indent the details block if desired (e.g., mainOptions.Indent)
+	for _, line := range strings.Split(strings.TrimSuffix(mangaDetails, "\n"), "\n") {
+		output.WriteString(mainOptions.Indent + line + "\n")
+	}
+	// Display full description separately if needed (Manga formatter truncates)
+	if mainOptions.Level >= Detailed && manga.Description != "" {
+		descHeader := fmt.Sprintf("%s%sDescription:", mainOptions.Prefix, mainOptions.Indent+mainOptions.Indent)
+		output.WriteString(fmt.Sprintf("%s\n%s%s%s\n", descHeader, mainOptions.Prefix, mainOptions.Indent+mainOptions.Indent, strings.ReplaceAll(manga.Description, "\n", "\n"+mainOptions.Prefix+mainOptions.Indent+mainOptions.Indent)))
+	}
+
+	// --- Chapters Section ---
+	if len(manga.Chapters) > 0 {
+		output.WriteString(fmt.Sprintf("\n%s--- Chapters (%d) ---\n", mainOptions.Indent, len(manga.Chapters)))
+
+		// Sort chapters (descending by number is common)
+		sortedChapters := make([]core.ChapterInfo, len(manga.Chapters))
+		copy(sortedChapters, manga.Chapters)
+		sort.SliceStable(sortedChapters, func(i, j int) bool {
+			// Sort primarily by number, descending
+			if sortedChapters[i].Number != sortedChapters[j].Number {
+				// Handle non-numeric chapters (e.g., number 0 or -1) by putting them last
+				if sortedChapters[i].Number <= 0 {
+					return false
+				}
+				if sortedChapters[j].Number <= 0 {
+					return true
+				}
+				return sortedChapters[i].Number > sortedChapters[j].Number // Higher number first
+			}
+			// Secondary sort by title if numbers are equal
+			return sortedChapters[i].Title < sortedChapters[j].Title
+		})
+
+		// Set options for displaying chapters within this list
+		chapterOptions := Options{
+			Level:  Minimal, // Keep the chapter list concise
+			Indent: "  ",    // Indentation relative to the chapter list item
+			Prefix: "- ",    // Use a list item prefix
+			// ItemLimit, ShowTags, IncludeAltTitles not relevant for Chapter
+		}
+
+		for _, chapter := range sortedChapters {
+			// Apply the overall indent from mainOptions to the prefix of the chapter line
+			chapterOptions.Prefix = mainOptions.Indent + "- "
+			chapterDisplay := Chapter(chapter, provider.ID(), chapterOptions)
+			output.WriteString(chapterDisplay)
+		}
+	} else {
+		output.WriteString(fmt.Sprintf("\n%sNo chapters available.\n", mainOptions.Indent))
+	}
+
+	return output.String()
+}
+
+// --- List Formatting Functions ---
+
+// formatList formats a generic list of items using a provided formatter function.
+// It handles numbering and avoids the TrimPrefix issue by controlling prefix/indent passed down.
+func formatList[T any](
+	items []T,
+	providerID string, // Use provider.Provider interface if needed universally
+	options Options, // Options for *each item* in the list
+	formatter func(item T, providerID string, itemOptions Options) string,
+	listName string, // e.g., "results", "manga titles", "chapters"
+	emptyMsg string,
+) string {
+	var output strings.Builder
+
+	if len(items) == 0 {
+		appendLine(&output, options, 0, emptyMsg) // Use base indent/prefix for the empty message
+		return output.String()
+	}
+
+	countPrefix := fmt.Sprintf("%s%s", options.Prefix, options.Indent) // Base prefix for count line
+	output.WriteString(fmt.Sprintf("%sFound %d %s:\n", countPrefix, len(items), listName))
+
+	// Options specifically for items within the list
+	itemOptions := options
+	itemOptions.Prefix = ""             // The number+dot will be the prefix, handled below
+	itemOptions.Indent = options.Indent // Keep the item indentation relative
+
+	basePrefix := fmt.Sprintf("%s%s", options.Prefix, options.Indent) // Base prefix for each numbered item line
+
+	for i, item := range items {
+		// Format the item itself using the provided formatter and itemOptions
+		itemStr := formatter(item, providerID, itemOptions)
+
+		// Add numbering and prefix, ensuring proper alignment
+		lines := strings.Split(strings.TrimSuffix(itemStr, "\n"), "\n")
+		if len(lines) > 0 {
+			// Add number to the first line
+			output.WriteString(fmt.Sprintf("%s%d. %s\n", basePrefix, i+1, lines[0]))
+			// Indent subsequent lines of the same item further
+			subsequentIndent := basePrefix + strings.Repeat(" ", len(fmt.Sprintf("%d. ", i+1)))
+			for _, line := range lines[1:] {
+				output.WriteString(fmt.Sprintf("%s%s\n", subsequentIndent, line))
+			}
+		}
+	}
+	return output.String()
+}
+
+// SearchResults formats and prints search results using the generic list formatter
+func SearchResults(results []core.Manga, provider provider.Provider) string {
+	listOptions := Options{ // Options for the overall list structure
+		Level:            Standard, // Show standard details for search results
+		IncludeAltTitles: true,
+		ShowTags:         true,
+		ItemLimit:        3, // Limit tags/alt-titles in lists
+		Indent:           "  ",
+		Prefix:           "  ",
+	}
+
+	// Adapt the Manga formatter slightly for the generic function signature
+	mangaFormatter := func(item core.Manga, providerID string, itemOptions Options) string {
+		// Need the provider object, not just ID, for Manga formatter
+		return Manga(item, provider, itemOptions)
+	}
+
+	// Need to wrap the specific formatter to match the generic signature
+	formatterAdapter := func(item core.Manga, pID string, itemOptions Options) string {
+		// We ignore pID here because mangaFormatter captures the provider object
+		return mangaFormatter(item, "", itemOptions)
+	}
+
+	return formatList(results, provider.ID(), listOptions, formatterAdapter, "results", "No results found")
+}
+
+// MangaList formats and prints a manga list using the generic list formatter
+func MangaList(mangas []core.Manga, provider provider.Provider) string {
+	listOptions := Options{ // Options for the overall list structure
+		Level:  Minimal, // Minimal details for simple lists
+		Indent: "  ",
+		Prefix: "  ",
+		// Other options like ItemLimit, ShowTags irrelevant for Minimal
+	}
+
+	// Adapt the Manga formatter slightly for the generic function signature
+	mangaFormatter := func(item core.Manga, providerID string, itemOptions Options) string {
+		// Need the provider object, not just ID, for Manga formatter
+		return Manga(item, provider, itemOptions)
+	}
+
+	// Need to wrap the specific formatter to match the generic signature
+	formatterAdapter := func(item core.Manga, pID string, itemOptions Options) string {
+		// We ignore pID here because mangaFormatter captures the provider object
+		return mangaFormatter(item, "", itemOptions)
+	}
+
+	return formatList(mangas, provider.ID(), listOptions, formatterAdapter, "manga titles", "No manga found")
+}
+
+// ChapterList formats and prints a list of chapters using the generic list formatter
+func ChapterList(chapters []core.ChapterInfo, providerID string) string {
+	listOptions := Options{ // Options for the overall list structure
+		Level:  Minimal, // Minimal details for chapter lists
+		Indent: "  ",
+		Prefix: "  ",
+	}
+
+	// The Chapter formatter already matches the generic signature
+	chapterFormatter := func(item core.ChapterInfo, pID string, itemOptions Options) string {
+		return Chapter(item, pID, itemOptions)
+	}
+
+	return formatList(chapters, providerID, listOptions, chapterFormatter, "chapters", "No chapters found")
+}

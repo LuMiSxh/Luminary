@@ -10,7 +10,8 @@
 
 ### Download Release
 
-You can download pre-built binaries from the [releases page](https://github.com/lumisxh/Luminary/releases) on GitHub. Choose the appropriate binary for your operating system and architecture.
+You can download pre-built binaries from the [releases page](https://github.com/lumisxh/Luminary/releases) on GitHub.
+Choose the appropriate binary for your operating system and architecture.
 
 ### Build from Source
 
@@ -31,9 +32,8 @@ go build
 
 ### Multi-Source Support
 
-Luminary connects to multiple manga sources through a unified interface, allowing you to search and download from different providers with the same commands.
-
-
+Luminary connects to multiple manga sources through a unified interface, allowing you to search and download from
+different providers with the same commands.
 
 ### Powerful Search Capabilities
 
@@ -59,13 +59,13 @@ Download chapters directly to your device with configurable options for concurre
 
 ```bash
 # Download a chapter
-luminary download agent:chapter-id
+luminary download provider:chapter-id
 
 # Multiple chapters
-luminary download agent:chapter-id-1 agent:chapter-id-2
+luminary download provider:chapter-id-1 provider:chapter-id-2
 
 # Configure download options
-luminary download agent:chapter-id --output ./my-manga --format jpeg --concurrent 10
+luminary download provider:chapter-id --output ./my-manga --format jpeg --concurrent 10
 ```
 
 ### CLI & API Modes
@@ -87,10 +87,8 @@ luminary --api search "manga title"
 ### List Available Manga Sources
 
 ```bash
-luminary agents
+luminary providers
 ```
-
-
 
 ### List Manga from a Source
 
@@ -98,18 +96,23 @@ luminary agents
 # List all manga
 luminary list
 
-# List manga from a specific agent
-luminary list --agent mangadex
+# List manga from a specific provider (e.g., "mgd" for MangaDex)
+luminary list --provider mgd
 ```
 
 ### Get Detailed Information
 
 ```bash
 # Get manga details including all chapters
-luminary info agent:manga-id
+luminary info provider:manga-id
 ```
 
+### Download Manga
 
+```bash
+# Download a specific chapter
+luminary download provider:chapter-id
+```
 
 ![Separator](.github/assets/luminary-separator.png)
 
@@ -123,9 +126,9 @@ Luminary provides human-readable error messages with detailed debug information 
 
 Powered by Go's concurrency features, Luminary downloads manga efficiently with configurable concurrency limits.
 
-### Extensible Agent System
+### Extensible Provider System
 
-A plugin-like architecture makes it easy to add support for new manga sources through the agent interface.
+A plugin-like architecture makes it easy to add support for new manga sources through the provider interface.
 
 ### Rate Limiting
 
@@ -135,18 +138,22 @@ Built-in rate limiting protects manga sources from excessive requests and preven
 
 ## Development
 
-This project is still in development. If you want to contribute, feel free to fork the repository and create a pull request. You can also open an issue if you find a bug or have a feature request.
+This project is still in heavy development.
+If you want to contribute, feel free to fork the repository and create a pull
+request.
+You can also open an issue if you find a bug or have a feature request.
 
-### Adding a New Agent
+### Adding a New Provider
 
-Luminary supports adding new manga sources through its agent interface. For more information, see the [Agent Implementation Guide](agents/AGENT.md).
+Luminary supports adding new manga sources through its provider interface. For more information, see
+the [Provider Implementation Guide](internal/providers/AGENT.md).
 
 ```go
-// Example: Simplified agent implementation
-func NewAgent(e *engine.Engine) engine.Agent {
-    return &MyAgent{
+// Example: Simplified provider implementation
+func NewProvider(e *engine.Engine) provider.Provider {
+    return &MyProvider{
         engine: e,
-        config: MyAgentConfig{
+        config: MyProviderConfig{
             ID:          "mys",
             Name:        "My Source",
             Description: "My manga source description",
