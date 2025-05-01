@@ -97,8 +97,8 @@ func New() *Engine {
 		Logger:       loggerService,
 	}
 
-	// Create rate limiter service
-	rateLimiterService := network.NewRateLimiterService(2 * time.Second)
+	// Create rate limiter service with logger
+	rateLimiterService := network.NewRateLimiterService(2*time.Second, loggerService)
 
 	// Create DOM service
 	domService := &parser.DOMService{}

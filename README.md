@@ -21,7 +21,7 @@ git clone https://github.com/lumisxh/Luminary.git
 
 # Build the application
 cd Luminary
-go build
+go build ./cmd/luminary
 
 # Optional: Add to your PATH
 ```
