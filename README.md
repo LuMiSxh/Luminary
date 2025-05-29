@@ -71,12 +71,13 @@ luminary download provider:chapter-id --output ./my-manga --format jpeg --concur
 ### CLI & API Modes
 
 All commands support both interactive human-readable output and machine-readable JSON for integration with other tools.
+For more details on the API mode, please refer to the [API Documentation](Api_Doc.md).
 
 ```bash
 # Interactive mode
 luminary search "manga title"
 
-# API mode
+# API mode (see documentation for usage)
 luminary --api search "manga title"
 ```
 
@@ -151,14 +152,14 @@ the [Provider Implementation Guide](internal/providers/provider.md).
 ```go
 // Example: Simplified provider implementation
 func NewProvider(e *engine.Engine) provider.Provider {
-    return &MyProvider{
-        engine: e,
-        config: MyProviderConfig{
-            ID:          "mys",
-            Name:        "My Source",
-            Description: "My manga source description",
-            SiteURL:     "https://mysource.com",
-        },
-    }
+return &MyProvider{
+engine: e,
+config: MyProviderConfig{
+ID:          "mys",
+Name:        "My Source",
+Description: "My manga source description",
+SiteURL:     "https://mysource.com",
+},
+}
 }
 ```
