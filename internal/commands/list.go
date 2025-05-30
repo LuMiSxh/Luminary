@@ -21,7 +21,6 @@ import (
 	"Luminary/pkg/engine/display"
 	"Luminary/pkg/errors"
 	"Luminary/pkg/provider"
-	"Luminary/pkg/util"
 	"context"
 	"fmt"
 	"sync"
@@ -35,14 +34,6 @@ var (
 	listLimit    int
 	listPages    int
 )
-
-// MangaListItem represents a manga item for API responses
-type MangaListItem struct {
-	ID           string `json:"id"`
-	Title        string `json:"title"`
-	Provider     string `json:"provider"`
-	ProviderName string `json:"provider_name,omitempty"`
-}
 
 var listCmd = &cobra.Command{
 	Use:   "list",
@@ -63,7 +54,7 @@ var listCmd = &cobra.Command{
 		ctx = core.WithConcurrency(ctx, maxConcurrency)
 
 		// Inform user about extended timeout if applicable
-		if timeoutDuration > time.Minute && !apiMode {
+		if timeoutDuration > time.Minute {
 			fmt.Printf("Note: Using extended timeout of %v for this request.\n",
 				timeoutDuration.Round(time.Second))
 		}
@@ -74,11 +65,6 @@ var listCmd = &cobra.Command{
 			var exists bool
 			selectedProvider, exists = appEngine.GetProvider(listProvider)
 			if !exists {
-				if apiMode {
-					util.OutputJSON("error", nil, fmt.Errorf("provider '%s' not found", listProvider))
-					return
-				}
-
 				fmt.Printf("Error: Provider '%s' not found\n", listProvider)
 				fmt.Println("Available providers:")
 				for _, a := range appEngine.AllProvider() {
@@ -95,169 +81,85 @@ var listCmd = &cobra.Command{
 			// We use empty search to get a list of manga
 		}
 
-		if apiMode {
-			var allMangas []MangaListItem
-			var mu sync.Mutex
-			var wg sync.WaitGroup
-			errorChan := make(chan error, len(appEngine.AllProvider()))
+		if selectedProvider != nil {
+			// Single provider case - no need for parallelism
+			fmt.Printf("Listing manga from provider: %s (%s)\n", selectedProvider.ID(), selectedProvider.Name())
+			fmt.Printf("Limit: %d manga per page\n", options.Limit)
+			if options.Pages > 0 {
+				fmt.Printf("Pages: %d\n", options.Pages)
+			} else {
+				fmt.Println("Pages: all available")
+			}
+			fmt.Println()
 
-			// Create semaphore for concurrency control
+			// Use empty search to get the list of manga
+			mangas, err := selectedProvider.Search(ctx, "", options)
+			if err != nil {
+				handleListError(err, selectedProvider.ID(), selectedProvider.Name(), false)
+				return
+			}
+
+			displayMangaList(mangas, selectedProvider)
+		} else {
+			// Multiple providers - use parallel processing
+			fmt.Println("Listing manga from all providers:")
+			fmt.Printf("Limit: %d manga per page\n", options.Limit)
+			if options.Pages > 0 {
+				fmt.Printf("Pages: %d\n", options.Pages)
+			} else {
+				fmt.Println("Pages: all available")
+			}
+			fmt.Printf("Concurrency: %d\n", maxConcurrency)
+			fmt.Println("\nFetching data from providers in parallel. Results will appear as they complete...")
+
+			// Create synchronization primitives
+			var wg sync.WaitGroup
+			var mu sync.Mutex
 			concurrency := maxConcurrency
 			if concurrency <= 0 {
-				concurrency = 5 // Default fallback
+				concurrency = 3 // Default fallback
 			}
 			semaphore := make(chan struct{}, concurrency)
 
-			// Function to list manga from a single provider concurrently
-			listProviderMangas := func(provider provider.Provider) {
-				defer wg.Done()
-				defer func() { <-semaphore }() // Release semaphore
-
-				// Use empty search to get list of manga
-				mangas, err := provider.Search(ctx, "", options)
-				if err != nil {
-					errorChan <- fmt.Errorf("error from provider %s: %w", provider.ID(), err)
-					return
-				}
-
-				// Safely add results to the shared slice
-				mu.Lock()
-				for _, manga := range mangas {
-					mangaItem := MangaListItem{
-						ID:           core.FormatMangaID(provider.ID(), manga.ID),
-						Title:        manga.Title,
-						Provider:     provider.ID(),
-						ProviderName: provider.Name(),
-					}
-					allMangas = append(allMangas, mangaItem)
-				}
-				mu.Unlock()
-			}
-
-			if selectedProvider != nil {
+			// Process each provider concurrently
+			for _, prov := range appEngine.AllProvider() {
 				wg.Add(1)
 				semaphore <- struct{}{} // Acquire semaphore
-				go listProviderMangas(selectedProvider)
-			} else {
-				// List manga from all providers concurrently
-				for _, provider := range appEngine.AllProvider() {
-					wg.Add(1)
-					semaphore <- struct{}{} // Acquire semaphore
-					go listProviderMangas(provider)
-				}
+
+				go func(p provider.Provider) {
+					defer wg.Done()
+					defer func() { <-semaphore }() // Release semaphore
+
+					// Use empty search to get list of manga
+					mangas, err := p.Search(ctx, "", options)
+
+					// Lock while we print to avoid interleaved output
+					mu.Lock()
+					defer mu.Unlock()
+
+					fmt.Printf("\n--- From provider: %s (%s) ---\n", p.ID(), p.Name())
+
+					if err != nil {
+						// Show error but continue with other providers
+						handleListError(err, p.ID(), p.Name(), true)
+						return
+					}
+
+					// Display results
+					displayMangaList(mangas, p)
+				}(prov)
 			}
 
-			// Wait for all operations to complete
+			// Wait for all providers to complete
 			wg.Wait()
-			close(errorChan)
-
-			// Process any errors
-			var errors []error
-			for err := range errorChan {
-				errors = append(errors, err)
-			}
-
-			// Create response data with provider filter info if applicable
-			responseData := map[string]interface{}{
-				"mangas": allMangas,
-				"count":  len(allMangas),
-			}
-
-			if selectedProvider != nil {
-				responseData["provider"] = selectedProvider.ID()
-				responseData["provider_name"] = selectedProvider.Name()
-			}
-
-			util.OutputJSON("success", responseData, nil)
-		} else {
-			if selectedProvider != nil {
-				// Single provider case - no need for parallelism
-				fmt.Printf("Listing manga from provider: %s (%s)\n", selectedProvider.ID(), selectedProvider.Name())
-				fmt.Printf("Limit: %d manga per page\n", options.Limit)
-				if options.Pages > 0 {
-					fmt.Printf("Pages: %d\n", options.Pages)
-				} else {
-					fmt.Println("Pages: all available")
-				}
-				fmt.Println()
-
-				// Use empty search to get the list of manga
-				mangas, err := selectedProvider.Search(ctx, "", options)
-				if err != nil {
-					handleListError(err, selectedProvider.ID(), selectedProvider.Name(), false)
-					return
-				}
-
-				displayMangaList(mangas, selectedProvider)
-			} else {
-				// Multiple providers - use parallel processing
-				fmt.Println("Listing manga from all providers:")
-				fmt.Printf("Limit: %d manga per page\n", options.Limit)
-				if options.Pages > 0 {
-					fmt.Printf("Pages: %d\n", options.Pages)
-				} else {
-					fmt.Println("Pages: all available")
-				}
-				fmt.Printf("Concurrency: %d\n", maxConcurrency)
-				fmt.Println("\nFetching data from providers in parallel. Results will appear as they complete...")
-
-				// Create synchronization primitives
-				var wg sync.WaitGroup
-				var mu sync.Mutex
-				concurrency := maxConcurrency
-				if concurrency <= 0 {
-					concurrency = 3 // Default fallback
-				}
-				semaphore := make(chan struct{}, concurrency)
-
-				// Process each provider concurrently
-				for _, prov := range appEngine.AllProvider() {
-					wg.Add(1)
-					semaphore <- struct{}{} // Acquire semaphore
-
-					go func(p provider.Provider) {
-						defer wg.Done()
-						defer func() { <-semaphore }() // Release semaphore
-
-						// Use empty search to get list of manga
-						mangas, err := p.Search(ctx, "", options)
-
-						// Lock while we print to avoid interleaved output
-						mu.Lock()
-						defer mu.Unlock()
-
-						fmt.Printf("\n--- From provider: %s (%s) ---\n", p.ID(), p.Name())
-
-						if err != nil {
-							// Show error but continue with other providers
-							handleListError(err, p.ID(), p.Name(), true)
-							return
-						}
-
-						// Display results
-						displayMangaList(mangas, p)
-					}(prov)
-				}
-
-				// Wait for all providers to complete
-				wg.Wait()
-				fmt.Println("\nAll providers completed processing.")
-			}
+			fmt.Println("\nAll providers completed processing.")
 		}
 	},
 }
 
 // handleListError provides user-friendly error messages based on error type
 func handleListError(err error, providerID, providerName string, continueOnError bool) {
-	// For API mode or when we should continue despite errors
-	if apiMode || continueOnError {
-		if apiMode {
-			// In API mode, we generally don't report errors for individual providers,
-			// but we could add them to a "errors" section in the response if needed
-			return
-		}
-
-		// For CLI with the continue flag, show brief error but continue
+	if continueOnError {
 		if errors.IsServerError(err) {
 			fmt.Printf("  Error: Server error from %s. Skipping.\n", providerName)
 		} else if errors.Is(err, errors.ErrRateLimit) {
@@ -270,7 +172,6 @@ func handleListError(err error, providerID, providerName string, continueOnError
 		return
 	}
 
-	// For CLI mode with a single provider (no continuation)
 	if errors.IsServerError(err) {
 		fmt.Printf("Error: Server error from %s. Please try again later.\n", providerName)
 	} else if errors.Is(err, errors.ErrRateLimit) {

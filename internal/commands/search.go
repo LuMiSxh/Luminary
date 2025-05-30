@@ -21,7 +21,6 @@ import (
 	"Luminary/pkg/engine/display"
 	"Luminary/pkg/errors"
 	"Luminary/pkg/provider"
-	"Luminary/pkg/util"
 	"context"
 	"fmt"
 	"strings"
@@ -40,17 +39,6 @@ var (
 	includeAltTitles bool
 	includeAllLangs  bool
 )
-
-// MangaSearchResult represents a manga search result for API output
-type MangaSearchResult struct {
-	ID           string   `json:"id"`
-	Title        string   `json:"title"`
-	Provider     string   `json:"provider"`
-	ProviderName string   `json:"provider_name,omitempty"`
-	AltTitles    []string `json:"alt_titles,omitempty"`
-	Authors      []string `json:"authors,omitempty"`
-	Tags         []string `json:"tags,omitempty"`
-}
 
 // searchCmd represents the search command
 var searchCmd = &cobra.Command{
@@ -75,7 +63,7 @@ var searchCmd = &cobra.Command{
 		ctx = core.WithConcurrency(ctx, maxConcurrency)
 
 		// Inform user about extended timeout if applicable
-		if timeoutDuration > time.Minute && !apiMode {
+		if timeoutDuration > time.Minute {
 			fmt.Printf("Note: Using extended timeout of %v for this request.\n",
 				timeoutDuration.Round(time.Second))
 		}
@@ -94,11 +82,6 @@ var searchCmd = &cobra.Command{
 		if searchProvider != "" {
 			// Validate the provider if specified
 			if !appEngine.ProviderExists(searchProvider) {
-				if apiMode {
-					util.OutputJSON("error", nil, fmt.Errorf("provider '%s' not found", searchProvider))
-					return
-				}
-
 				fmt.Printf("Error: Provider '%s' not found\n", searchProvider)
 				fmt.Println("Available providers:")
 				for _, a := range appEngine.AllProvider() {
@@ -128,11 +111,7 @@ var searchCmd = &cobra.Command{
 			return
 		}
 
-		if apiMode {
-			outputAPIResults(results, query)
-		} else {
-			displayConsoleResults(results, query, options)
-		}
+		displayConsoleResults(results, query, options)
 	},
 }
 
@@ -146,40 +125,24 @@ func handleSearchError(err error, query, providerSpec string) {
 
 	// Check for specific error types in order of specificity
 	if errors.IsServerError(err) {
-		if apiMode {
-			util.OutputJSON("error", nil, fmt.Errorf("server error from %s: %v", providerName, err))
-		} else {
-			fmt.Printf("Error: Server error while searching with %s. Please try again later.\n", providerName)
-		}
+		fmt.Printf("Error: Server error while searching with %s. Please try again later.\n", providerName)
 		return
 	}
 
 	// Check for rate limiting
 	if errors.Is(err, errors.ErrRateLimit) {
-		if apiMode {
-			util.OutputJSON("error", nil, fmt.Errorf("rate limit exceeded for %s", providerName))
-		} else {
-			fmt.Printf("Error: Rate limit exceeded for %s. Please try again later.\n", providerName)
-		}
+		fmt.Printf("Error: Rate limit exceeded for %s. Please try again later.\n", providerName)
 		return
 	}
 
 	// Check for timeout errors
 	if errors.Is(err, context.DeadlineExceeded) {
-		if apiMode {
-			util.OutputJSON("error", nil, fmt.Errorf("search timed out for query '%s'", query))
-		} else {
-			fmt.Printf("Error: Search timed out. Try reducing the number of pages or increasing the time limit.\n")
-		}
+		fmt.Printf("Error: Search timed out. Try reducing the number of pages or increasing the time limit.\n")
 		return
 	}
 
 	// Generic error handling
-	if apiMode {
-		util.OutputJSON("error", nil, err)
-	} else {
-		fmt.Printf("Error searching: %v\n", err)
-	}
+	fmt.Printf("Error searching: %v\n", err)
 }
 
 // Calculate an appropriate timeout based on pagination parameters
@@ -219,45 +182,6 @@ func calculateTimeout(limit, pages int, multipleProviders bool) time.Duration {
 	}
 
 	return timeoutDuration
-}
-
-// outputAPIResults formats and outputs search results as JSON for API mode
-func outputAPIResults(results map[string][]core.Manga, query string) {
-	var allResults []MangaSearchResult
-
-	// Convert all results to our standardized format
-	for providerID, mangaList := range results {
-		prov, _ := appEngine.GetProvider(providerID)
-
-		for _, manga := range mangaList {
-			result := MangaSearchResult{
-				ID:           core.FormatMangaID(providerID, manga.ID),
-				Title:        manga.Title,
-				Provider:     providerID,
-				ProviderName: prov.Name(),
-			}
-
-			// Include additional fields if available
-			if includeAltTitles && len(manga.AltTitles) > 0 {
-				result.AltTitles = manga.AltTitles
-			}
-			if len(manga.Authors) > 0 {
-				result.Authors = manga.Authors
-			}
-			if len(manga.Tags) > 0 {
-				result.Tags = manga.Tags
-			}
-
-			allResults = append(allResults, result)
-		}
-	}
-
-	// Output the search results
-	util.OutputJSON("success", map[string]interface{}{
-		"query":   query,
-		"results": allResults,
-		"count":   len(allResults),
-	}, nil)
 }
 
 // displayConsoleResults shows search results in an interactive, user-friendly format

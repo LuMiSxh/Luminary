@@ -24,7 +24,6 @@ import (
 	"github.com/spf13/cobra"
 )
 
-var apiMode bool
 var maxConcurrency int
 var appEngine *engine.Engine
 var version string
@@ -60,6 +59,5 @@ func Execute() {
 
 func init() {
 	// Global flags
-	rootCmd.PersistentFlags().BoolVar(&apiMode, "api", false, "Output machine-readable JSON only")
 	rootCmd.PersistentFlags().IntVar(&maxConcurrency, "concurrency", 5, "Maximum number of concurrent operations")
 }

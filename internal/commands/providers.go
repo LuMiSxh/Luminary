@@ -17,7 +17,6 @@
 package commands
 
 import (
-	"Luminary/pkg/util"
 	"fmt"
 	"sort"
 	"strings"
@@ -37,49 +36,22 @@ var providersCmd = &cobra.Command{
 			return allProviders[i].Name() < allProviders[j].Name()
 		})
 
-		if apiMode {
-			// Create a slice to hold provider data
-			type ProviderData struct {
-				ID          string `json:"id"`
-				Name        string `json:"name"`
-				Description string `json:"description"`
-			}
+		fmt.Println("Available manga source providers:")
+		fmt.Println("")
 
-			providerList := make([]ProviderData, 0, len(allProviders))
+		format := "%-12s %-20s %s\n"
+		fmt.Printf(format, "ID", "NAME", "DESCRIPTION")
+		fmt.Println(strings.Repeat("-", 80))
 
-			for _, provider := range allProviders {
-				providerData := ProviderData{
-					ID:          provider.ID(),
-					Name:        provider.Name(),
-					Description: provider.Description(),
-				}
-
-				providerList = append(providerList, providerData)
-			}
-
-			// Output machine-readable JSON using our utility
-			util.OutputJSON("success", map[string]interface{}{
-				"providers": providerList,
-			}, nil)
-		} else {
-			// User-friendly output
-			fmt.Println("Available manga source providers:")
-			fmt.Println("")
-
-			format := "%-12s %-20s %s\n"
-			fmt.Printf(format, "ID", "NAME", "DESCRIPTION")
-			fmt.Println(strings.Repeat("-", 80))
-
-			for _, provider := range allProviders {
-				fmt.Printf(format,
-					provider.ID(),
-					provider.Name(),
-					provider.Description())
-			}
-
-			fmt.Println("")
-			fmt.Println("Use --provider flag with the search command to specify a particular provider")
+		for _, provider := range allProviders {
+			fmt.Printf(format,
+				provider.ID(),
+				provider.Name(),
+				provider.Description())
 		}
+
+		fmt.Println("")
+		fmt.Println("Use --provider flag with the search command to specify a particular provider")
 	},
 }
 

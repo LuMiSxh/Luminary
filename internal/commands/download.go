@@ -19,7 +19,6 @@ package commands
 import (
 	"Luminary/pkg/engine/core"
 	"Luminary/pkg/errors"
-	"Luminary/pkg/util"
 	"context"
 	"fmt"
 	"os"
@@ -33,15 +32,6 @@ var (
 	downloadVolume    int  // Volume flag
 	downloadHasVolume bool // Track if the volume flag was provided
 )
-
-// DownloadInfo represents download info for API responses
-type DownloadInfo struct {
-	ChapterID    string `json:"chapter_id"`
-	Provider     string `json:"provider"`
-	ProviderName string `json:"provider_name"`
-	OutputDir    string `json:"output_dir"`
-	Volume       *int   `json:"volume,omitempty"` // Volume in API response
-}
 
 var downloadCmd = &cobra.Command{
 	Use:   "download [chapter-ids...]",
@@ -64,11 +54,6 @@ var downloadCmd = &cobra.Command{
 			// Parse the chapter ID format "provider:id"
 			providerID, chapterID, err := core.ParseMangaID(combinedID)
 			if err != nil {
-				if apiMode {
-					util.OutputJSON("error", nil, err)
-					return
-				}
-
 				fmt.Println("Error: invalid chapter ID format, must be 'provider:id'")
 				return
 			}
@@ -76,11 +61,6 @@ var downloadCmd = &cobra.Command{
 			// Validate that the provider exists
 			prov, exists := appEngine.GetProvider(providerID)
 			if !exists {
-				if apiMode {
-					util.OutputJSON("error", nil, fmt.Errorf("provider '%s' not found", providerID))
-					return
-				}
-
 				fmt.Printf("Error: Provider '%s' not found\n", providerID)
 				fmt.Println("Available Provider:")
 				for _, a := range appEngine.AllProvider() {
@@ -91,32 +71,14 @@ var downloadCmd = &cobra.Command{
 
 			outputDir := downloadOutput
 
-			if apiMode {
-				// Prepare download info for API response
-				downloadInfo := DownloadInfo{
-					ChapterID:    chapterID,
-					Provider:     prov.ID(),
-					ProviderName: prov.Name(),
-					OutputDir:    outputDir,
-				}
+			fmt.Printf("Downloading chapter %s from provider %s (%s)...\n",
+				chapterID, prov.ID(), prov.Name())
+			fmt.Printf("Output directory: %s\n", downloadOutput)
+			fmt.Printf("Concurrent downloads: %d\n", maxConcurrency)
 
-				// Add volume info if provided
-				if downloadHasVolume {
-					downloadInfo.Volume = &downloadVolume
-				}
-
-				util.OutputJSON("downloading", downloadInfo, nil)
-			} else {
-				// Interactive mode for CLI users
-				fmt.Printf("Downloading chapter %s from provider %s (%s)...\n",
-					chapterID, prov.ID(), prov.Name())
-				fmt.Printf("Output directory: %s\n", downloadOutput)
-				fmt.Printf("Concurrent downloads: %d\n", maxConcurrency)
-
-				// Print volume info if provided
-				if downloadHasVolume {
-					fmt.Printf("Volume override: %d\n", downloadVolume)
-				}
+			// Print volume info if provided
+			if downloadHasVolume {
+				fmt.Printf("Volume override: %d\n", downloadVolume)
 			}
 
 			// Create a context with timeout
@@ -133,18 +95,7 @@ var downloadCmd = &cobra.Command{
 				return
 			}
 
-			// If we're in CLI mode, provide a success message
-			if !apiMode {
-				fmt.Printf("Successfully downloaded chapter to %s\n", outputDir)
-			} else {
-				// Report successful download in API mode
-				util.OutputJSON("success", map[string]interface{}{
-					"message":    fmt.Sprintf("Successfully downloaded chapter %s", chapterID),
-					"chapter_id": chapterID,
-					"provider":   prov.ID(),
-					"output_dir": outputDir,
-				}, nil)
-			}
+			fmt.Printf("Successfully downloaded chapter to %s\n", outputDir)
 		}
 	},
 }
@@ -154,52 +105,32 @@ func handleDownloadError(err error, providerID, chapterID, providerName, outputD
 	// Check for specific error types in order of specificity
 	if errors.IsNotFound(err) {
 		// Not found error
-		if apiMode {
-			util.OutputJSON("error", nil, fmt.Errorf("chapter '%s' not found on %s", chapterID, providerName))
-		} else {
-			fmt.Printf("Error: Chapter '%s' not found on %s\n", chapterID, providerName)
-		}
+		fmt.Printf("Error: Chapter '%s' not found on %s\n", chapterID, providerName)
 		return
 	}
 
 	// Check for server errors
 	if errors.IsServerError(err) {
-		if apiMode {
-			util.OutputJSON("error", nil, fmt.Errorf("server error from %s: %v", providerName, err))
-		} else {
-			fmt.Printf("Error: Server error from %s. Please try again later.\n", providerName)
-		}
+		fmt.Printf("Error: Server error from %s. Please try again later.\n", providerName)
 		return
 	}
 
 	// Check for rate limiting
 	if errors.Is(err, errors.ErrRateLimit) {
-		if apiMode {
-			util.OutputJSON("error", nil, fmt.Errorf("rate limit exceeded for %s", providerName))
-		} else {
-			fmt.Printf("Error: Rate limit exceeded for %s. Please try again later.\n", providerName)
-		}
+		fmt.Printf("Error: Rate limit exceeded for %s. Please try again later.\n", providerName)
 		return
 	}
 
 	// File system errors
 	var ioErr *os.PathError
 	if errors.As(err, &ioErr) {
-		if apiMode {
-			util.OutputJSON("error", nil, fmt.Errorf("file system error: %v", ioErr))
-		} else {
-			fmt.Printf("Error: Failed to access output directory '%s': %v\n", outputDir, ioErr)
-			fmt.Println("Make sure the directory exists and you have write permissions.")
-		}
+		fmt.Printf("Error: Failed to access output directory '%s': %v\n", outputDir, ioErr)
+		fmt.Println("Make sure the directory exists and you have write permissions.")
 		return
 	}
 
 	// Generic error handling
-	if apiMode {
-		util.OutputJSON("error", nil, err)
-	} else {
-		fmt.Printf("Error downloading chapter: %v\n", err)
-	}
+	fmt.Printf("Error downloading chapter: %v\n", err)
 }
 
 func init() {

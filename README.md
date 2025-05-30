@@ -68,20 +68,9 @@ luminary download provider:chapter-id-1 provider:chapter-id-2
 luminary download provider:chapter-id --output ./my-manga --format jpeg --concurrent 10
 ```
 
-### CLI & API Modes
+### RPC Interface
 
-All commands support both interactive human-readable output and machine-readable JSON for integration with other tools.
-For more details on the API mode, please refer to the [API Documentation](Api_Doc.md).
-
-```bash
-# Interactive mode
-luminary search "manga title"
-
-# API mode (see documentation for usage)
-luminary --api search "manga title"
-```
-
-Additionally, Luminary offers a dedicated JSON-RPC executable (`luminary-rpc`) for more robust programmatic integration. 
+Luminary offers a dedicated JSON-RPC executable (`luminary-rpc`) for more robust programmatic integration. 
 This mode allows communication over stdin/stdout using the JSON-RPC 2.0 protocol, providing access to all core 
 functionalities. For detailed information on using the RPC interface, 
 please see the [JSON-RPC Documentation](RPC_Doc.md).
