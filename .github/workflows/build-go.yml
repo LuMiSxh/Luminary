@@ -20,26 +20,36 @@ jobs:
             target: 'darwin-amd64'
             output_name: 'luminary'
             binary_path: 'luminary'
+            output_name_rpc: 'luminary-rpc'
+            binary_path_rpc: 'luminary-rpc'
 
           - os: 'macos-latest'
             target: 'darwin-arm64'
             output_name: 'luminary'
             binary_path: 'luminary'
+            output_name_rpc: 'luminary-rpc'
+            binary_path_rpc: 'luminary-rpc'
 
           - os: 'ubuntu-latest'
             target: 'linux-amd64'
             output_name: 'luminary'
             binary_path: 'luminary'
+            output_name_rpc: 'luminary-rpc'
+            binary_path_rpc: 'luminary-rpc'
 
           - os: 'ubuntu-latest'
             target: 'linux-arm64'
             output_name: 'luminary'
             binary_path: 'luminary'
+            output_name_rpc: 'luminary-rpc'
+            binary_path_rpc: 'luminary-rpc'
 
           - os: 'windows-latest'
             target: 'windows-amd64'
             output_name: 'luminary.exe'
             binary_path: 'luminary.exe'
+            output_name_rpc: 'luminary-rpc.exe'
+            binary_path_rpc: 'luminary-rpc.exe'
 
     runs-on: ${{ matrix.os }}
     steps:
@@ -62,19 +72,27 @@ jobs:
           echo "os=$OS" >> $GITHUB_OUTPUT
           echo "arch=$ARCH" >> $GITHUB_OUTPUT
 
-      - name: Build binary
+      - name: Build binaries
         env:
           GOOS: ${{ steps.parse-target.outputs.os }}
           GOARCH: ${{ steps.parse-target.outputs.arch }}
         run: |
+          echo "Building main CLI: ${{ matrix.output_name }}"
           go build -o ${{ matrix.output_name }} -ldflags "-X github.com/lumisxh/luminary/cmd/luminary.Version=${{ github.event.inputs.version }}" -v ./cmd/luminary
+          
+          echo "Building RPC binary: ${{ matrix.output_name_rpc }}"
+          go build -o ${{ matrix.output_name_rpc }} -ldflags "-X github.com/lumisxh/luminary/cmd/luminary-rpc.Version=${{ github.event.inputs.version }}" -v ./cmd/luminary-rpc
 
       - name: Create release archive for Linux/macOS
         if: ${{ steps.parse-target.outputs.os != 'windows' }}
         run: |
           mkdir -p release
           cp ${{ matrix.binary_path }} release/
+          cp ${{ matrix.binary_path_rpc }} release/
+          
           cp README.md release/
+          cp RPC_Doc.md release/
+          cp Api_Doc.md release/
           cd release
           tar -czf ../luminary-${{ github.event.inputs.version }}-${{ matrix.target }}.tar.gz *
           cd ..
@@ -84,7 +102,11 @@ jobs:
         run: |
           mkdir -p release
           cp ${{ matrix.binary_path }} release/
+          cp ${{ matrix.binary_path_rpc }} release/
+          
           cp README.md release/
+          cp RPC_Doc.md release/
+          cp Api_Doc.md release/
           cd release
           7z a -tzip ../luminary-${{ github.event.inputs.version }}-${{ matrix.target }}.zip *
           cd ..
@@ -123,6 +145,7 @@ jobs:
             # Luminary v${{ github.event.inputs.version }}
             
             A streamlined CLI tool for searching and downloading manga across multiple sources.
+            This release includes both the standard CLI (`luminary` or `luminary.exe`) and the JSON-RPC executable (`luminary-rpc` or `luminary-rpc.exe`).
             
             ## Downloads
             
@@ -134,4 +157,5 @@ jobs:
             
             ## Installation
             
-            Download the appropriate file for your operating system, extract it, and add the executable to your PATH (optional).
+            Download the appropriate file for your operating system, extract it, and add the executables (`luminary` and `luminary-rpc`) to your PATH (optional).
+            Refer to `README.md` (included in the archive) for usage details, `Api_Doc.md` for CLI API mode, and `RPC_Doc.md` for the JSON-RPC interface.

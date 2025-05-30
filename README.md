@@ -81,6 +81,11 @@ luminary search "manga title"
 luminary --api search "manga title"
 ```
 
+Additionally, Luminary offers a dedicated JSON-RPC executable (`luminary-rpc`) for more robust programmatic integration. 
+This mode allows communication over stdin/stdout using the JSON-RPC 2.0 protocol, providing access to all core 
+functionalities. For detailed information on using the RPC interface, 
+please see the [JSON-RPC Documentation](RPC_Doc.md).
+
 ![Separator](.github/assets/luminary-separator.png)
 
 ## Usage Examples
