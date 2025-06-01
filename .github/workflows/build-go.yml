@@ -158,4 +158,4 @@ jobs:
             ## Installation
             
             Download the appropriate file for your operating system, extract it, and add the executables (`luminary` and `luminary-rpc`) to your PATH (optional).
-            Refer to `README.md` (included in the archive) for usage details, `Api_Doc.md` for CLI API mode, and `RPC_Doc.md` for the JSON-RPC interface.
+            Refer to `README.md` (included in the archive) for usage details and `RPC_Doc.md` for the JSON-RPC interface.
