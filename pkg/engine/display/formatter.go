@@ -49,18 +49,6 @@ type Options struct {
 	// Note: Detail lines will automatically get an additional indent level.
 }
 
-// DefaultDisplayOptions returns the default display options
-func DefaultDisplayOptions() Options {
-	return Options{
-		Level:            Standard,
-		IncludeAltTitles: true,
-		ShowTags:         true,
-		ItemLimit:        5,
-		Indent:           "  ",
-		Prefix:           "",
-	}
-}
-
 // --- Helper Functions ---
 
 // appendLine adds a formatted line to the strings.Builder with appropriate prefix and indentation.
@@ -195,8 +183,8 @@ func Chapter(chapter core.ChapterInfo, providerID string, options Options) strin
 	// Format date
 	dateStr := formatNullableDate(chapter.Date)
 
-	// Format language
-	langStr := formatNullableLanguage(chapter.Language)
+	// Format language with more detail
+	langStr := formatChapterLanguage(chapter.Language)
 
 	// Format chapter number
 	chapterNum := "?"
@@ -207,6 +195,76 @@ func Chapter(chapter core.ChapterInfo, providerID string, options Options) strin
 	appendLine(&output, options, 1, "Chapter %s | Released: %s | Language: %s", chapterNum, dateStr, langStr)
 
 	return output.String()
+}
+
+// formatChapterLanguage formats a chapter's language with more detail than the generic formatter
+func formatChapterLanguage(language *string) string {
+	if language == nil {
+		return "Unknown"
+	}
+
+	langCode := *language
+
+	// Map of common language codes to full names (can be extended)
+	languageNames := map[string]string{
+		"en":    "English",
+		"ja":    "Japanese",
+		"es":    "Spanish",
+		"fr":    "French",
+		"de":    "German",
+		"pt":    "Portuguese",
+		"ru":    "Russian",
+		"ko":    "Korean",
+		"zh":    "Chinese",
+		"it":    "Italian",
+		"ar":    "Arabic",
+		"tr":    "Turkish",
+		"th":    "Thai",
+		"vi":    "Vietnamese",
+		"id":    "Indonesian",
+		"pl":    "Polish",
+		"nl":    "Dutch",
+		"sv":    "Swedish",
+		"da":    "Danish",
+		"no":    "Norwegian",
+		"fi":    "Finnish",
+		"hu":    "Hungarian",
+		"cs":    "Czech",
+		"sk":    "Slovak",
+		"bg":    "Bulgarian",
+		"hr":    "Croatian",
+		"sr":    "Serbian",
+		"sl":    "Slovenian",
+		"et":    "Estonian",
+		"lv":    "Latvian",
+		"lt":    "Lithuanian",
+		"ro":    "Romanian",
+		"el":    "Greek",
+		"he":    "Hebrew",
+		"fa":    "Persian",
+		"hi":    "Hindi",
+		"bn":    "Bengali",
+		"ta":    "Tamil",
+		"te":    "Telugu",
+		"ml":    "Malayalam",
+		"kn":    "Kannada",
+		"gu":    "Gujarati",
+		"pa":    "Punjabi",
+		"ur":    "Urdu",
+		"uk":    "Ukrainian",
+		"zh-cn": "Chinese (Simplified)",
+		"zh-tw": "Chinese (Traditional)",
+		"zh-hk": "Chinese (Hong Kong)",
+		"pt-br": "Portuguese (Brazil)",
+		"es-la": "Spanish (Latin America)",
+	}
+
+	if fullName, exists := languageNames[langCode]; exists {
+		return fmt.Sprintf("%s (%s)", fullName, langCode)
+	}
+
+	// Return the code as-is if we don't have a mapping
+	return langCode
 }
 
 // MangaInfo formats and prints detailed manga information including chapters.

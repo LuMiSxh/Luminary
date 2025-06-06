@@ -21,6 +21,7 @@ import (
 	"Luminary/pkg/engine/core"
 	"Luminary/pkg/errors"
 	"Luminary/pkg/provider"
+	"Luminary/pkg/util"
 	"context"
 	"fmt"
 	"sync"
@@ -237,31 +238,27 @@ type InfoService struct {
 
 // InfoRequest defines the parameters for fetching manga info.
 type InfoRequest struct {
-	MangaID string `json:"manga_id"` // Expected format: "provider:id"
-}
-
-// ChapterInfo holds information about a single manga chapter.
-type ChapterInfo struct {
-	ID       string  `json:"id"`
-	Title    string  `json:"title"`
-	Number   float64 `json:"number"`
-	Date     *string `json:"date,omitempty"`     // Nullable date in RFC3339 format
-	Language *string `json:"language,omitempty"` // Nullable language
+	MangaID        string `json:"manga_id"`                  // Expected format: "provider:id"
+	LanguageFilter string `json:"language_filter,omitempty"` // Comma-separated language codes/names
+	ShowLanguages  bool   `json:"show_languages,omitempty"`  // Whether to include available languages in response
 }
 
 // MangaInfo holds detailed information about a manga.
 type MangaInfo struct {
-	ID           string        `json:"id"`
-	Title        string        `json:"title"`
-	Provider     string        `json:"provider"`
-	ProviderName string        `json:"provider_name"`
-	Description  string        `json:"description,omitempty"`
-	Authors      []string      `json:"authors,omitempty"`
-	Status       string        `json:"status,omitempty"`
-	Tags         []string      `json:"tags,omitempty"`
-	Chapters     []ChapterInfo `json:"chapters"`
-	ChapterCount int           `json:"chapter_count"`
-	LastUpdated  *string       `json:"last_updated,omitempty"` // Nullable date in RFC3339 format
+	ID                   string             `json:"id"`
+	Title                string             `json:"title"`
+	Provider             string             `json:"provider"`
+	ProviderName         string             `json:"provider_name"`
+	Description          string             `json:"description,omitempty"`
+	Authors              []string           `json:"authors,omitempty"`
+	Status               string             `json:"status,omitempty"`
+	Tags                 []string           `json:"tags,omitempty"`
+	Chapters             []core.ChapterInfo `json:"chapters"`
+	ChapterCount         int                `json:"chapter_count"`
+	LastUpdated          *string            `json:"last_updated,omitempty"`           // Nullable date in RFC3339 format
+	AvailableLanguages   []string           `json:"available_languages,omitempty"`    // Available languages if requested
+	FilteredChapters     bool               `json:"filtered_chapters,omitempty"`      // Whether chapters were filtered
+	OriginalChapterCount int                `json:"original_chapter_count,omitempty"` // Original count before filtering
 }
 
 // Get retrieves detailed information for a specific manga.
@@ -313,9 +310,23 @@ func (s *InfoService) Get(args *InfoRequest, reply *MangaInfo) error {
 		manga.Chapters = []core.ChapterInfo{}
 	}
 
-	chapters := make([]ChapterInfo, len(manga.Chapters))
+	// Store original chapter information
+	originalChapters := manga.Chapters
+	originalChapterCount := len(originalChapters)
+	filteredChapters := false
+
+	// Apply language filtering if requested
+	if args.LanguageFilter != "" {
+		languageFilter := util.NewLanguageFilter(args.LanguageFilter)
+		if languageFilter != nil {
+			manga.Chapters = languageFilter.FilterChapters(manga.Chapters)
+			filteredChapters = len(manga.Chapters) < originalChapterCount
+		}
+	}
+
+	chapters := make([]core.ChapterInfo, len(manga.Chapters))
 	for i, ch := range manga.Chapters {
-		chapters[i] = ChapterInfo{
+		chapters[i] = core.ChapterInfo{
 			ID:       core.FormatMangaID(providerID, ch.ID), // Chapter ID needs provider prefix too
 			Title:    ch.Title,
 			Number:   ch.Number,
@@ -325,8 +336,7 @@ func (s *InfoService) Get(args *InfoRequest, reply *MangaInfo) error {
 
 		// Handle nullable date
 		if ch.Date != nil {
-			dateStr := ch.Date.Format(time.RFC3339)
-			chapters[i].Date = &dateStr
+			chapters[i].Date = ch.Date
 		}
 
 		// Handle nullable language
@@ -341,18 +351,27 @@ func (s *InfoService) Get(args *InfoRequest, reply *MangaInfo) error {
 		lastUpdatedStr = &str
 	}
 
+	// Prepare available languages if requested
+	var availableLanguages []string
+	if args.ShowLanguages {
+		availableLanguages = util.GetAvailableLanguages(originalChapters)
+	}
+
 	*reply = MangaInfo{
-		ID:           core.FormatMangaID(providerID, manga.ID),
-		Title:        manga.Title,
-		Provider:     providerID,
-		ProviderName: prov.Name(),
-		Description:  manga.Description,
-		Authors:      manga.Authors,
-		Status:       manga.Status,
-		Tags:         manga.Tags,
-		Chapters:     chapters,
-		ChapterCount: len(chapters),
-		LastUpdated:  lastUpdatedStr,
+		ID:                   core.FormatMangaID(providerID, manga.ID),
+		Title:                manga.Title,
+		Provider:             providerID,
+		ProviderName:         prov.Name(),
+		Description:          manga.Description,
+		Authors:              manga.Authors,
+		Status:               manga.Status,
+		Tags:                 manga.Tags,
+		Chapters:             chapters,
+		ChapterCount:         len(chapters),
+		LastUpdated:          lastUpdatedStr,
+		AvailableLanguages:   availableLanguages,
+		FilteredChapters:     filteredChapters,
+		OriginalChapterCount: originalChapterCount,
 	}
 	return nil
 }

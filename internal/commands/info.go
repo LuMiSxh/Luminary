@@ -1,3 +1,4 @@
+// internal/commands/info.go
 // Luminary: A streamlined CLI tool for searching and downloading manga.
 // Copyright (C) 2025 Luca M. Schmidt (LuMiSxh)
 //
@@ -20,11 +21,17 @@ import (
 	"Luminary/pkg/engine/core"
 	"Luminary/pkg/engine/display"
 	"Luminary/pkg/errors"
+	"Luminary/pkg/util"
 	"context"
 	"fmt"
 	"time"
 
 	"github.com/spf13/cobra"
+)
+
+var (
+	infoLanguageFilter string
+	infoShowLanguages  bool
 )
 
 var infoCmd = &cobra.Command{
@@ -67,6 +74,46 @@ var infoCmd = &cobra.Command{
 			manga.Chapters = []core.ChapterInfo{}
 		}
 
+		// Handle language filtering
+		originalChapterCount := len(manga.Chapters)
+		if infoLanguageFilter != "" {
+			languageFilter := util.NewLanguageFilter(infoLanguageFilter)
+			if languageFilter != nil {
+				manga.Chapters = languageFilter.FilterChapters(manga.Chapters)
+
+				// Show filtering results
+				if len(manga.Chapters) == 0 {
+					fmt.Printf("No chapters found matching language filter: %s\n", infoLanguageFilter)
+
+					// Re-fetch to get all chapters for available languages display
+					originalManga, refetchErr := prov.GetManga(ctx, mangaID)
+					if refetchErr == nil && originalManga != nil {
+						fmt.Printf("Available languages in this manga: %s\n", util.FormatAvailableLanguages(originalManga.Chapters))
+					} else {
+						fmt.Println("Available languages: Could not retrieve language information")
+					}
+					return
+				} else if len(manga.Chapters) < originalChapterCount {
+					fmt.Printf("Showing %d of %d chapters (filtered by language: %s)\n",
+						len(manga.Chapters), originalChapterCount, infoLanguageFilter)
+				}
+			}
+		}
+
+		// Show available languages if requested
+		if infoShowLanguages {
+			// Need to get original chapters for language list if filtering was applied
+			if infoLanguageFilter != "" {
+				// Re-fetch to get all chapters for language display
+				originalManga, err := prov.GetManga(ctx, mangaID)
+				if err == nil && originalManga != nil {
+					fmt.Printf("Available languages: %s\n\n", util.FormatAvailableLanguages(originalManga.Chapters))
+				}
+			} else {
+				fmt.Printf("Available languages: %s\n\n", util.FormatAvailableLanguages(manga.Chapters))
+			}
+		}
+
 		displayOptions := display.Options{
 			Level:            display.Detailed,
 			IncludeAltTitles: true,
@@ -107,4 +154,15 @@ func handleMangaError(err error, providerID, mangaID, providerName string) {
 
 func init() {
 	rootCmd.AddCommand(infoCmd)
+
+	// Add language filtering flags
+	infoCmd.Flags().StringVar(&infoLanguageFilter, "language", "", "Filter chapters by language (comma-separated codes/names, e.g., 'en,ja' or 'english,japanese')")
+	infoCmd.Flags().StringVar(&infoLanguageFilter, "lang", "", "Alias for --language")
+	infoCmd.Flags().BoolVar(&infoShowLanguages, "show-languages", false, "Show available languages for this manga")
+
+	// Mark the lang flag as an alias (hidden from help)
+	err := infoCmd.Flags().MarkHidden("lang")
+	if err != nil {
+		return
+	}
 }

@@ -46,8 +46,8 @@ An error response will look like this:
 
 - `result`: `null` for error calls.
 - `error`: An object containing:
-    - `code`: An integer error code (standard JSON-RPC error codes or custom).
-    - `message`: A string describing the error.
+  - `code`: An integer error code (standard JSON-RPC error codes or custom).
+  - `message`: A string describing the error.
 - `id`: The `id` from the original request, or `null` if the request `id` could not be determined.
 
 ![Separator](.github/assets/luminary-separator.png)
@@ -177,13 +177,13 @@ Performs a manga search.
 **Fields:**
 - `query`: The search query used.
 - `results`: An array of `SearchResultItem` objects.
-    - `id`: Combined provider ID and manga ID (e.g., "mgd:manga-id-123").
-    - `title`: Main title of the manga.
-    - `provider`: ID of the provider.
-    - `provider_name`: Display name of the provider.
-    - `alt_titles`: Array of alternative titles (optional).
-    - `authors`: Array of author names (optional).
-    - `tags`: Array of genre/tag strings (optional).
+  - `id`: Combined provider ID and manga ID (e.g., "mgd:manga-id-123").
+  - `title`: Main title of the manga.
+  - `provider`: ID of the provider.
+  - `provider_name`: Display name of the provider.
+  - `alt_titles`: Array of alternative titles (optional).
+  - `authors`: Array of author names (optional).
+  - `tags`: Array of genre/tag strings (optional).
 - `count`: Total number of results returned.
 
 ---
@@ -247,22 +247,29 @@ Retrieves a list of manga.
 
 ### InfoService
 
-Retrieves detailed information about a specific manga.
+Retrieves detailed information about a specific manga, with optional language filtering.
 
 #### `InfoService.Get`
 
-Fetches details for a manga given its combined ID.
+Fetches details for a manga given its combined ID, with optional chapter language filtering.
 
 **Request Parameters (`args_object`):**
 ```json
 {
-  "manga_id": "provider_id:manga_specific_id" // e.g., "mgd:manga-id-123"
+  "manga_id": "provider_id:manga_specific_id", // e.g., "mgd:manga-id-123"
+  "language_filter": "en,ja",                  // Optional: Comma-separated language codes/names to filter chapters
+  "show_languages": true                       // Optional: Include available languages in response (default: false)
 }
 ```
 
-**Example Request:**
+**Example Request (Basic):**
 ```json
 {"method": "InfoService.Get", "params": [{"manga_id": "mgd:manga-id-123"}], "id": 5}
+```
+
+**Example Request (With Language Filter):**
+```json
+{"method": "InfoService.Get", "params": [{"manga_id": "mgd:manga-id-123", "language_filter": "en,ja", "show_languages": true}], "id": 5}
 ```
 
 **Response Data (`response_data`):**
@@ -283,12 +290,23 @@ Fetches details for a manga given its combined ID.
       "number": 1.0,
       "date": "2024-01-15T10:30:00Z", // ISO 8601 format, nullable (null if unavailable)
       "language": "en" // ISO 639-1 language code, nullable (null if unavailable)
+    },
+    {
+      "id": "mgd:chapter-457",
+      "title": "第1話: 始まり",
+      "number": 1.0,
+      "date": "2024-01-15T10:30:00Z",
+      "language": "ja"
     }
   ],
-  "chapter_count": 1,
-  "last_updated": "2024-04-10T12:00:00Z" // Nullable date in ISO 8601 format
+  "chapter_count": 2,
+  "last_updated": "2024-04-10T12:00:00Z", // Nullable date in ISO 8601 format
+  "available_languages": ["en", "ja", "es", "fr"], // Optional: Only included if show_languages=true
+  "filtered_chapters": true,                       // Optional: Only included if language filtering was applied
+  "original_chapter_count": 15                     // Optional: Only included if chapters were filtered
 }
 ```
+
 **Fields:**
 - `id`: Combined provider ID and manga ID.
 - `title`: Manga title.
@@ -298,14 +316,48 @@ Fetches details for a manga given its combined ID.
 - `authors`: Array of author names.
 - `status`: Publication status (e.g., "ongoing", "completed").
 - `tags`: Array of genres/tags.
-- `chapters`: Array of `ChapterInfo` objects.
-    - `id`: Combined provider ID and chapter ID (e.g., "mgd:chapter-456").
-    - `title`: Chapter title.
-    - `number`: Chapter number (float, e.g., 1.0, 1.5).
-    - `date`: Publication date in ISO 8601 format (null if unavailable).
-    - `language`: Language code in ISO 639-1 format (e.g., "en", "ja", "fr") (null if unavailable).
-- `chapter_count`: Total number of chapters.
+- `chapters`: Array of `ChapterInfo` objects (filtered by language if `language_filter` was specified).
+  - `id`: Combined provider ID and chapter ID (e.g., "mgd:chapter-456").
+  - `title`: Chapter title.
+  - `number`: Chapter number (float, e.g., 1.0, 1.5).
+  - `date`: Publication date in ISO 8601 format (null if unavailable).
+  - `language`: Language code in ISO 639-1 format (e.g., "en", "ja", "fr") (null if unavailable).
+- `chapter_count`: Total number of chapters returned (after filtering, if applied).
 - `last_updated`: When the manga was last updated (null if unavailable).
+- `available_languages`: Array of all available language codes for this manga (only included if `show_languages=true`).
+- `filtered_chapters`: Boolean indicating whether the chapters list was filtered by language (only included if filtering was applied).
+- `original_chapter_count`: Original number of chapters before language filtering (only included if filtering was applied).
+
+#### Language Filtering
+
+The `language_filter` parameter accepts:
+
+- **Language codes** (ISO 639-1): `"en"`, `"ja"`, `"es"`, `"fr"`, `"de"`, `"pt"`, `"ru"`, `"ko"`, `"zh"`, `"it"`, etc.
+- **Extended codes**: `"zh-cn"`, `"zh-tw"`, `"zh-hk"`, `"pt-br"`, `"es-la"`
+- **Language names** (case-insensitive): `"english"`, `"japanese"`, `"spanish"`, `"french"`, etc.
+- **Special values**: `"unknown"` or `"none"` for chapters with no specified language
+- **Multiple languages**: Comma-separated list, e.g., `"en,ja"` or `"english,japanese"`
+
+**Language Filter Examples:**
+```json
+// Filter by English only
+{"manga_id": "mgd:123", "language_filter": "en"}
+
+// Filter by English and Japanese
+{"manga_id": "mgd:123", "language_filter": "en,ja"}
+
+// Filter by language names
+{"manga_id": "mgd:123", "language_filter": "english,japanese"}
+
+// Show available languages without filtering
+{"manga_id": "mgd:123", "show_languages": true}
+
+// Filter by English and show all available languages
+{"manga_id": "mgd:123", "language_filter": "en", "show_languages": true}
+
+// Include chapters with unknown language
+{"manga_id": "mgd:123", "language_filter": "en,unknown"}
+```
 
 ---
 
@@ -355,6 +407,98 @@ Initiates the download of a specific manga chapter.
 
 ![Separator](.github/assets/luminary-separator.png)
 
+## Language Support
+
+### Supported Language Codes
+
+Luminary supports the following language codes and names for filtering:
+
+**Common Language Codes (ISO 639-1):**
+- `en` - English
+- `ja` - Japanese
+- `es` - Spanish
+- `fr` - French
+- `de` - German
+- `pt` - Portuguese
+- `ru` - Russian
+- `ko` - Korean
+- `zh` - Chinese
+- `it` - Italian
+- `ar` - Arabic
+- `tr` - Turkish
+- `th` - Thai
+- `vi` - Vietnamese
+- `id` - Indonesian
+- `pl` - Polish
+- `nl` - Dutch
+- `sv` - Swedish
+- `da` - Danish
+- `no` - Norwegian
+- `fi` - Finnish
+- `hu` - Hungarian
+- `cs` - Czech
+- `sk` - Slovak
+- `bg` - Bulgarian
+- `hr` - Croatian
+- `sr` - Serbian
+- `sl` - Slovenian
+- `et` - Estonian
+- `lv` - Latvian
+- `lt` - Lithuanian
+- `ro` - Romanian
+- `el` - Greek
+- `he` - Hebrew
+- `fa` - Persian
+- `hi` - Hindi
+- `bn` - Bengali
+- `ta` - Tamil
+- `te` - Telugu
+- `ml` - Malayalam
+- `kn` - Kannada
+- `gu` - Gujarati
+- `pa` - Punjabi
+- `ur` - Urdu
+- `uk` - Ukrainian
+
+**Extended Language Codes:**
+- `zh-cn` - Chinese (Simplified)
+- `zh-tw` - Chinese (Traditional)
+- `zh-hk` - Chinese (Hong Kong)
+- `pt-br` - Portuguese (Brazil)
+- `es-la` - Spanish (Latin America)
+
+**Special Values:**
+- `unknown` or `none` - Chapters with no specified language
+
+### Language Filtering Examples
+
+**Filter by single language:**
+```json
+{"method": "InfoService.Get", "params": [{"manga_id": "mgd:123", "language_filter": "en"}], "id": 1}
+```
+
+**Filter by multiple languages:**
+```json
+{"method": "InfoService.Get", "params": [{"manga_id": "mgd:123", "language_filter": "en,ja,es"}], "id": 1}
+```
+
+**Filter by language names:**
+```json
+{"method": "InfoService.Get", "params": [{"manga_id": "mgd:123", "language_filter": "english,japanese"}], "id": 1}
+```
+
+**Include unknown language chapters:**
+```json
+{"method": "InfoService.Get", "params": [{"manga_id": "mgd:123", "language_filter": "en,unknown"}], "id": 1}
+```
+
+**Show available languages:**
+```json
+{"method": "InfoService.Get", "params": [{"manga_id": "mgd:123", "show_languages": true}], "id": 1}
+```
+
+![Separator](.github/assets/luminary-separator.png)
+
 ## Error Handling
 
 If a JSON-RPC request is malformed, or if an unrecoverable server-side error occurs before a specific service method can process the business logic, a standard JSON-RPC error response is returned:
@@ -375,6 +519,23 @@ If `SearchService.Search` is called with an invalid provider ID:
 ```
 *(Note: The specific error code for business logic errors might vary or be a generic one).*
 
+**Language filtering specific errors:**
+If no chapters match the language filter:
+```json
+{
+  "result": {
+    "id": "mgd:123",
+    "title": "Manga Title",
+    "chapters": [],
+    "chapter_count": 0,
+    "available_languages": ["fr", "de", "es"],
+    "filtered_chapters": true,
+    "original_chapter_count": 25
+  },
+  "id": 8
+}
+```
+
 ![Separator](.github/assets/luminary-separator.png)
 
 ## Notes
@@ -388,5 +549,9 @@ If `SearchService.Search` is called with an invalid provider ID:
 - Optional fields in responses may be absent if no data is available.
 - Chapter dates and languages will be null when the information is not available.
 - Language codes follow the ISO 639-1 standard (two-letter codes like "en", "ja", "fr").
+- Language filtering is case-insensitive and supports both codes and full language names.
+- When using language filtering, the `chapters` array will only contain chapters matching the specified languages.
+- The `available_languages` field is only included when `show_languages=true` is specified in the request.
+- Language filtering can significantly reduce the number of chapters returned, which is useful for manga with many translations.
 
 This RPC interface provides a more structured and robust way to integrate Luminary's functionalities compared to parsing CLI output.
