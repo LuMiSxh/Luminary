@@ -19,9 +19,9 @@ package rpc
 import (
 	"Luminary/pkg/engine"
 	"Luminary/pkg/engine/core"
+	"Luminary/pkg/errors"
 	"Luminary/pkg/provider"
 	"context"
-	"errors"
 	"fmt"
 	"sync"
 	"time"
@@ -181,7 +181,11 @@ func (s *SearchService) Search(args *SearchRequest, reply *SearchResponse) error
 	if args.Provider != "" {
 		p, exists := s.Services.engine.GetProvider(args.Provider)
 		if !exists {
-			return fmt.Errorf("provider '%s' not found", args.Provider)
+			return &Error{
+				Code:    ErrCodeProviderNotFound,
+				Message: fmt.Sprintf("Provider '%s' not found", args.Provider),
+				Data:    map[string]interface{}{"provider": args.Provider},
+			}
 		}
 		providersToSearch = append(providersToSearch, p)
 	} else {
@@ -190,7 +194,11 @@ func (s *SearchService) Search(args *SearchRequest, reply *SearchResponse) error
 
 	results, err := s.Services.engine.Search.SearchAcrossProviders(ctx, providersToSearch, args.Query, options)
 	if err != nil {
-		return err
+		return &Error{
+			Code:    ErrCodeSearchFailed,
+			Message: fmt.Sprintf("Search failed: %v", err),
+			Data:    map[string]interface{}{"query": args.Query, "error": err.Error()},
+		}
 	}
 
 	var allResults []SearchResultItem
@@ -234,10 +242,11 @@ type InfoRequest struct {
 
 // ChapterInfo holds information about a single manga chapter.
 type ChapterInfo struct {
-	ID     string  `json:"id"`
-	Title  string  `json:"title"`
-	Number float64 `json:"number"`
-	Date   string  `json:"date,omitempty"`
+	ID       string  `json:"id"`
+	Title    string  `json:"title"`
+	Number   float64 `json:"number"`
+	Date     *string `json:"date,omitempty"`     // Nullable date in RFC3339 format
+	Language *string `json:"language,omitempty"` // Nullable language
 }
 
 // MangaInfo holds detailed information about a manga.
@@ -252,18 +261,27 @@ type MangaInfo struct {
 	Tags         []string      `json:"tags,omitempty"`
 	Chapters     []ChapterInfo `json:"chapters"`
 	ChapterCount int           `json:"chapter_count"`
+	LastUpdated  *string       `json:"last_updated,omitempty"` // Nullable date in RFC3339 format
 }
 
 // Get retrieves detailed information for a specific manga.
 func (s *InfoService) Get(args *InfoRequest, reply *MangaInfo) error {
 	providerID, mangaID, err := core.ParseMangaID(args.MangaID)
 	if err != nil {
-		return fmt.Errorf("invalid manga_id format: %w", err)
+		return &Error{
+			Code:    ErrCodeInvalidInput,
+			Message: fmt.Sprintf("Invalid manga_id format: %v", err),
+			Data:    map[string]interface{}{"manga_id": args.MangaID},
+		}
 	}
 
 	prov, exists := s.Services.engine.GetProvider(providerID)
 	if !exists {
-		return fmt.Errorf("provider '%s' not found", providerID)
+		return &Error{
+			Code:    ErrCodeProviderNotFound,
+			Message: fmt.Sprintf("Provider '%s' not found", providerID),
+			Data:    map[string]interface{}{"provider": providerID},
+		}
 	}
 
 	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
@@ -271,10 +289,25 @@ func (s *InfoService) Get(args *InfoRequest, reply *MangaInfo) error {
 
 	manga, err := prov.GetManga(ctx, mangaID)
 	if err != nil {
-		return err
+		if errors.IsNotFound(err) {
+			return &Error{
+				Code:    ErrCodeResourceNotFound,
+				Message: fmt.Sprintf("Manga '%s' not found on provider '%s'", mangaID, prov.Name()),
+				Data:    map[string]interface{}{"manga_id": mangaID, "provider": providerID},
+			}
+		}
+		return &Error{
+			Code:    ErrCodeFetchFailed,
+			Message: fmt.Sprintf("Failed to fetch manga information: %v", err),
+			Data:    map[string]interface{}{"manga_id": args.MangaID, "error": err.Error()},
+		}
 	}
 	if manga == nil || manga.Title == "" {
-		return fmt.Errorf("retrieved empty or invalid manga data for %s", args.MangaID)
+		return &Error{
+			Code:    ErrCodeInvalidData,
+			Message: fmt.Sprintf("Retrieved empty or invalid manga data for %s", args.MangaID),
+			Data:    map[string]interface{}{"manga_id": args.MangaID},
+		}
 	}
 	if manga.Chapters == nil {
 		manga.Chapters = []core.ChapterInfo{}
@@ -283,14 +316,29 @@ func (s *InfoService) Get(args *InfoRequest, reply *MangaInfo) error {
 	chapters := make([]ChapterInfo, len(manga.Chapters))
 	for i, ch := range manga.Chapters {
 		chapters[i] = ChapterInfo{
-			ID:     core.FormatMangaID(providerID, ch.ID), // Chapter ID needs provider prefix too
-			Title:  ch.Title,
-			Number: ch.Number,
-			Date:   "", // Initialize to empty string
+			ID:       core.FormatMangaID(providerID, ch.ID), // Chapter ID needs provider prefix too
+			Title:    ch.Title,
+			Number:   ch.Number,
+			Date:     nil, // Initialize to nil
+			Language: nil, // Initialize to nil
 		}
-		if !ch.Date.IsZero() {
-			chapters[i].Date = ch.Date.Format(time.RFC3339)
+
+		// Handle nullable date
+		if ch.Date != nil {
+			dateStr := ch.Date.Format(time.RFC3339)
+			chapters[i].Date = &dateStr
 		}
+
+		// Handle nullable language
+		if ch.Language != nil {
+			chapters[i].Language = ch.Language
+		}
+	}
+
+	var lastUpdatedStr *string
+	if manga.LastUpdated != nil {
+		str := manga.LastUpdated.Format(time.RFC3339)
+		lastUpdatedStr = &str
 	}
 
 	*reply = MangaInfo{
@@ -304,6 +352,7 @@ func (s *InfoService) Get(args *InfoRequest, reply *MangaInfo) error {
 		Tags:         manga.Tags,
 		Chapters:     chapters,
 		ChapterCount: len(chapters),
+		LastUpdated:  lastUpdatedStr,
 	}
 	return nil
 }
@@ -337,12 +386,20 @@ type DownloadResponse struct {
 func (s *DownloadService) Download(args *DownloadRequest, reply *DownloadResponse) error {
 	providerID, chapterIDPart, err := core.ParseMangaID(args.ChapterID)
 	if err != nil {
-		return fmt.Errorf("invalid chapter_id format: %w", err)
+		return &Error{
+			Code:    ErrCodeInvalidInput,
+			Message: fmt.Sprintf("Invalid chapter_id format: %v", err),
+			Data:    map[string]interface{}{"chapter_id": args.ChapterID},
+		}
 	}
 
 	prov, exists := s.Services.engine.GetProvider(providerID)
 	if !exists {
-		return fmt.Errorf("provider '%s' not found", providerID)
+		return &Error{
+			Code:    ErrCodeProviderNotFound,
+			Message: fmt.Sprintf("Provider '%s' not found", providerID),
+			Data:    map[string]interface{}{"provider": providerID},
+		}
 	}
 
 	outputDir := args.OutputDir
@@ -375,7 +432,21 @@ func (s *DownloadService) Download(args *DownloadRequest, reply *DownloadRespons
 			Success:      false,
 			Message:      fmt.Sprintf("Failed to download chapter: %v", err),
 		}
-		return err // Return the error so RPC client knows it failed
+
+		// Return structured error for better error handling
+		if errors.IsNotFound(err) {
+			return &Error{
+				Code:    ErrCodeResourceNotFound,
+				Message: fmt.Sprintf("Chapter '%s' not found on provider '%s'", chapterIDPart, prov.Name()),
+				Data:    map[string]interface{}{"chapter_id": chapterIDPart, "provider": providerID},
+			}
+		}
+
+		return &Error{
+			Code:    ErrCodeDownloadFailed,
+			Message: fmt.Sprintf("Download failed: %v", err),
+			Data:    map[string]interface{}{"chapter_id": args.ChapterID, "error": err.Error()},
+		}
 	}
 
 	*reply = DownloadResponse{
@@ -438,22 +509,26 @@ func (s *ListService) List(args *ListRequest, reply *ListResponse) error {
 
 	ctx, cancel := context.WithTimeout(context.Background(), timeoutDuration)
 	defer cancel()
-	// Note: core.WithConcurrency sets a value in the context,
-	// which individual provider.Search methods would need to respect if they manage their own sub-goroutines.
-	// For this top-level concurrent fan-out, the number of goroutines launched will be len(providersList).
-	// The args.Concurrency here is more for the SearchOptions if a provider uses it.
-	ctx = core.WithConcurrency(ctx, args.Concurrency) // Keep for SearchOptions
+	ctx = core.WithConcurrency(ctx, args.Concurrency)
 
 	var allMangas []SearchResultItem
 
 	if !multipleProviders {
 		p, exists := s.Services.engine.GetProvider(args.Provider)
 		if !exists {
-			return fmt.Errorf("provider '%s' not found", args.Provider)
+			return &Error{
+				Code:    ErrCodeProviderNotFound,
+				Message: fmt.Sprintf("Provider '%s' not found", args.Provider),
+				Data:    map[string]interface{}{"provider": args.Provider},
+			}
 		}
 		mangas, err := p.Search(ctx, "", options) // Empty query for listing
 		if err != nil {
-			return fmt.Errorf("error listing from provider %s: %w", args.Provider, err)
+			return &Error{
+				Code:    ErrCodeSearchFailed,
+				Message: fmt.Sprintf("Error listing from provider %s: %v", args.Provider, err),
+				Data:    map[string]interface{}{"provider": args.Provider, "error": err.Error()},
+			}
 		}
 		for _, manga := range mangas {
 			allMangas = append(allMangas, SearchResultItem{
@@ -484,14 +559,11 @@ func (s *ListService) List(args *ListRequest, reply *ListResponse) error {
 			wg.Add(1)
 			go func(currentProvider provider.Provider) {
 				defer wg.Done()
-				// Each provider search respects the overall context (ctx)
 				mangas, err := currentProvider.Search(ctx, "", options)
 				if err != nil {
-					// If context was canceled, provider.Search should ideally return ctx.Err()
-					// or an error wrapping it.
 					if ctx.Err() != nil && (errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) || errors.Is(err, ctx.Err())) {
 						s.Services.engine.Logger.Debug("Provider %s search cancelled/timed out: %v", currentProvider.ID(), err)
-						return // Don't flood errorChan if it's a context issue handled globally
+						return
 					}
 					errorChan <- fmt.Errorf("provider %s list error: %w", currentProvider.ID(), err)
 					return
@@ -509,7 +581,6 @@ func (s *ListService) List(args *ListRequest, reply *ListResponse) error {
 					})
 				}
 				if len(providerResults) > 0 {
-					// Check context before sending to channel to avoid blocking if main routine already timed out
 					select {
 					case resultBatchesChan <- providerResults:
 					case <-ctx.Done():
@@ -531,7 +602,7 @@ func (s *ListService) List(args *ListRequest, reply *ListResponse) error {
 
 		// Collect results and errors
 		collecting := true
-		var returnErr error // Variable to store a potential timeout error
+		var returnErr error
 
 	collectLoop:
 		for collecting {
@@ -540,7 +611,7 @@ func (s *ListService) List(args *ListRequest, reply *ListResponse) error {
 				if ok {
 					allMangas = append(allMangas, batch...)
 				} else {
-					resultBatchesChan = nil // Mark as drained
+					resultBatchesChan = nil
 				}
 			case err, ok := <-errorChan:
 				if ok {
@@ -548,32 +619,33 @@ func (s *ListService) List(args *ListRequest, reply *ListResponse) error {
 						s.Services.engine.Logger.Warn("Error during manga list sub-operation: %v", err)
 					}
 				} else {
-					errorChan = nil // Mark as drained
+					errorChan = nil
 				}
 			case <-ctx.Done():
 				s.Services.engine.Logger.Error("Listing operation timed out globally: %v", ctx.Err())
-				returnErr = fmt.Errorf("listing operation timed out: %w", ctx.Err())
-				// Wait for wg.Wait() and channel closing to finish, or a short additional timeout
+				returnErr = &Error{
+					Code:    ErrCodeTimeout,
+					Message: fmt.Sprintf("Listing operation timed out: %v", ctx.Err()),
+					Data:    map[string]interface{}{"timeout": timeoutDuration.String()},
+				}
 				select {
 				case <-waitAndCloseDone:
-					// Channels are closed by the waiter goroutine.
-				case <-time.After(2 * time.Second): // Grace period for cleanup.
+				case <-time.After(2 * time.Second):
 					s.Services.engine.Logger.Warn("Grace period for channel cleanup exceeded")
 				}
-				// Ensure channels are nil to exit loop if they weren't closed by waitAndCloseDone in time
 				resultBatchesChan = nil
 				errorChan = nil
-				break collectLoop // Exit the collection loop immediately
+				break collectLoop
 			}
 
 			if resultBatchesChan == nil && errorChan == nil {
-				collecting = false // No more results or errors to process
+				collecting = false
 			}
 		}
 
-		reply.Provider = "" // No specific provider since multiple were searched
+		reply.Provider = ""
 		reply.ProviderName = "Multiple Providers"
-		if returnErr != nil { // If a timeout error occurred, set reply and return the error
+		if returnErr != nil {
 			reply.Mangas = allMangas
 			reply.Count = len(allMangas)
 			return returnErr
@@ -582,12 +654,37 @@ func (s *ListService) List(args *ListRequest, reply *ListResponse) error {
 
 	reply.Mangas = allMangas
 	reply.Count = len(allMangas)
-	if len(allMangas) == 0 && (args.Provider != "" || multipleProviders) { // Adjusted condition slightly
+	if len(allMangas) == 0 && (args.Provider != "" || multipleProviders) {
 		s.Services.engine.Logger.Warn("No manga found for the given criteria")
 	} else if len(allMangas) > 0 {
 		s.Services.engine.Logger.Info("Listed %d mangas successfully", len(allMangas))
 	}
 	return nil
+}
+
+// --- Error Handling ---
+
+// RPC Error codes for structured error handling
+const (
+	ErrCodeInvalidInput     = -1001
+	ErrCodeProviderNotFound = -1002
+	ErrCodeResourceNotFound = -1003
+	ErrCodeSearchFailed     = -1004
+	ErrCodeFetchFailed      = -1005
+	ErrCodeDownloadFailed   = -1006
+	ErrCodeTimeout          = -1007
+	ErrCodeInvalidData      = -1008
+)
+
+// Error represents a structured RPC error
+type Error struct {
+	Code    int                    `json:"code"`
+	Message string                 `json:"message"`
+	Data    map[string]interface{} `json:"data,omitempty"`
+}
+
+func (e *Error) Error() string {
+	return fmt.Sprintf("RPC Error %d: %s", e.Code, e.Message)
 }
 
 // --- Timeout Calculation Helpers (similar to commands) ---

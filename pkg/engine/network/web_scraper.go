@@ -20,6 +20,7 @@ import (
 	"Luminary/pkg/engine/core"
 	"Luminary/pkg/engine/logger"
 	"Luminary/pkg/engine/parser"
+	"Luminary/pkg/util"
 	"context"
 	"fmt"
 	"io"
@@ -486,9 +487,6 @@ func (m *MadaraScraper) FetchMangaChapters(ctx context.Context, mangaID string) 
 		return nil, fmt.Errorf("failed to find chapter elements: %w", err)
 	}
 
-	// Get manga title for reference
-	mangaTitle := webPage.GetTitle()
-
 	// Extract chapter data
 	for _, elem := range chapterElements {
 		href := elem.Attr("href")
@@ -502,18 +500,29 @@ func (m *MadaraScraper) FetchMangaChapters(ctx context.Context, mangaID string) 
 		// Get chapter title
 		title := elem.Text()
 
-		// Remove manga title from chapter title if present
-		title = strings.Replace(title, mangaTitle, "", 1)
-		title = strings.TrimSpace(title)
-
 		// Extract chapter number
 		chapterNumber := parser.ExtractChapterNumber(title)
 
+		// Try to detect language from title or URL
+		language := util.DetectLanguageFromText(title)
+		if language == nil {
+			language = util.DetectLanguageFromText(href)
+		}
+
+		// Try to parse date if available
+		var date *time.Time
+		dateElement, err := elem.FindOne("span.chapter-release-date, .chapter-time")
+		if err == nil && dateElement != nil {
+			dateText := dateElement.Text()
+			date = util.ParseNullableDate(dateText)
+		}
+
 		chapter := core.ChapterInfo{
-			ID:     id,
-			Title:  title,
-			Number: chapterNumber,
-			Date:   time.Now(), // We'd need more parsing to get the actual date
+			ID:       id,
+			Title:    title,
+			Number:   chapterNumber,
+			Date:     date,
+			Language: language,
 		}
 
 		chapters = append(chapters, chapter)
@@ -583,11 +592,26 @@ func (m *MadaraScraper) extractChaptersFromPage(page *WebPage) ([]core.ChapterIn
 		// Extract chapter number
 		chapterNumber := parser.ExtractChapterNumber(title)
 
+		// Try to detect language from title or URL
+		language := util.DetectLanguageFromText(title)
+		if language == nil {
+			language = util.DetectLanguageFromText(href)
+		}
+
+		// Try to parse date if available
+		var date *time.Time
+		dateElement, err := elem.FindOne("span.chapter-release-date, .chapter-time")
+		if err == nil && dateElement != nil {
+			dateText := dateElement.Text()
+			date = util.ParseNullableDate(dateText)
+		}
+
 		chapter := core.ChapterInfo{
-			ID:     id,
-			Title:  title,
-			Number: chapterNumber,
-			Date:   time.Now(), // We'd need more parsing to get the actual date
+			ID:       id,
+			Title:    title,
+			Number:   chapterNumber,
+			Date:     date,
+			Language: language,
 		}
 
 		chapters = append(chapters, chapter)

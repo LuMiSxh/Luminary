@@ -57,3 +57,70 @@ func FormatDate(date time.Time) string {
 	}
 	return date.Format("2006-01-02")
 }
+
+// FormatNullableDate formats a nullable date pointer for display
+func FormatNullableDate(date *time.Time) string {
+	if date == nil {
+		return "Not specified"
+	}
+	return FormatDate(*date)
+}
+
+// FormatNullableLanguage formats a nullable language pointer for display
+func FormatNullableLanguage(language *string) string {
+	if language == nil {
+		return "Not specified"
+	}
+	return *language
+}
+
+// ParseNullableTime safely parses a time string, returning nil if empty or invalid
+func ParseNullableTime(timeStr string) *time.Time {
+	if timeStr == "" {
+		return nil
+	}
+
+	// Try parsing RFC3339 format first (common for APIs)
+	if t, err := time.Parse(time.RFC3339, timeStr); err == nil {
+		return &t
+	}
+
+	// Try other common formats
+	formats := []string{
+		"2006-01-02T15:04:05Z",
+		"2006-01-02 15:04:05",
+		"2006-01-02",
+		"January 2, 2006",
+		"Jan 2, 2006",
+		"01/02/2006",
+		"02/01/2006",
+		"2006/01/02",
+		"2 January 2006",
+		"2 Jan 2006",
+	}
+
+	for _, format := range formats {
+		if t, err := time.Parse(format, timeStr); err == nil {
+			return &t
+		}
+	}
+
+	return nil
+}
+
+// TimeToNullableString converts a nullable time pointer to a nullable string pointer for JSON
+func TimeToNullableString(t *time.Time) *string {
+	if t == nil {
+		return nil
+	}
+	str := t.Format(time.RFC3339)
+	return &str
+}
+
+// StringToNullableTime converts a nullable string pointer to a nullable time pointer
+func StringToNullableTime(s *string) *time.Time {
+	if s == nil {
+		return nil
+	}
+	return ParseNullableTime(*s)
+}

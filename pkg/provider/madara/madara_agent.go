@@ -43,6 +43,43 @@ type Provider struct {
 	webScraper   *network.WebScraperService
 }
 
+// extractMangaLastUpdated tries to extract the last updated date from manga page
+func extractMangaLastUpdated(page *network.WebPage) *time.Time {
+	// Common selectors for last updated information
+	selectors := []string{
+		".post-modified-date",
+		".updated",
+		".last-updated",
+		".manga-last-update",
+		".post-meta .updated",
+		"time.updated",
+		"[data-updated]",
+	}
+
+	for _, selector := range selectors {
+		elem, err := page.FindOne(selector)
+		if err != nil || elem == nil {
+			continue
+		}
+
+		// Try different attributes and text content
+		candidates := []string{
+			elem.Attr("datetime"),
+			elem.Attr("data-updated"),
+			elem.Attr("title"),
+			elem.Text(),
+		}
+
+		for _, candidate := range candidates {
+			if parsed := util.ParseNullableDate(candidate); parsed != nil {
+				return parsed
+			}
+		}
+	}
+
+	return nil
+}
+
 // NewProvider creates a new Madara-based provider
 func NewProvider(e *engine.Engine, config Config) provider.Provider {
 	// Create HTML provider config
@@ -773,7 +810,7 @@ func (p *Provider) searchWithAjaxParallel(ctx context.Context, query string, opt
 		}
 	}
 
-	// Apply rhe final limit if requested, but only if not using explicit pagination
+	// Apply the final limit if requested, but only if not using explicit pagination
 	if options.Pages <= 0 && len(allManga) > requestedLimit {
 		p.engine.Logger.Info("[%s] Trimming results from %d to requested limit %d",
 			p.ID(), len(allManga), requestedLimit)
@@ -964,6 +1001,9 @@ func (p *Provider) GetManga(ctx context.Context, id string) (*core.MangaInfo, er
 		}
 	}
 
+	// Extract last updated information
+	mangaInfo.LastUpdated = extractMangaLastUpdated(page)
+
 	// Get chapters
 	chapterSelectors := strings.Split(p.config.ChapterSelector, ",")
 	var chapters []core.ChapterInfo
@@ -992,48 +1032,42 @@ func (p *Provider) GetManga(ctx context.Context, id string) (*core.MangaInfo, er
 				// Get chapter title
 				title := strings.TrimSpace(elem.Text())
 
-				// Extract chapter number from title or URL
-				chapterNumber := parser.ExtractChapterNumber(title)
-				if chapterNumber == 0 {
-					chapterNumber = parser.ExtractChapterNumber(chapterID)
+				// Use the cascading parser to get the chapter number
+				chapterNumber := parser.CascadeParseChapterNumber(title, chapterID)
+
+				// Try to detect language from title
+				language := util.DetectLanguageFromText(title)
+				if language == nil {
+					// Try to detect from URL
+					language = util.DetectLanguageFromText(href)
 				}
 
 				// Get chapter date
 				dateText := ""
-				dateElement, err := elem.FindOne("span.chapter-release-date")
-				if err == nil && dateElement != nil {
-					dateText = strings.TrimSpace(dateElement.Text())
-				}
-
-				// Parse date if available
-				var date time.Time
-				if dateText != "" {
-					// Try various date formats
-					dateFormats := []string{
-						"January 2, 2006",
-						"Jan 2, 2006",
-						"2006-01-02",
-						"01/02/2006",
-					}
-
-					for _, format := range dateFormats {
-						date, _ = time.Parse(format, dateText)
-						if !date.IsZero() {
-							break
+				parentElement := elem.Parent()
+				if parentElement != nil {
+					// Try to find date span in parent
+					dateElement, err := parentElement.FindOne("span.chapter-release-date")
+					if err == nil && dateElement != nil {
+						// Try to find an <i> element inside the date span
+						iElement, err := dateElement.FindOne("i")
+						if err == nil && iElement != nil {
+							dateText = strings.TrimSpace(iElement.Text())
+						} else {
+							dateText = strings.TrimSpace(dateElement.Text())
 						}
 					}
 				}
 
-				// If date is still zero, use current time
-				if date.IsZero() {
-					date = time.Now()
-				}
+				// Parse date if available
+				date := util.ParseNullableDate(dateText)
 
 				chapter := core.ChapterInfo{
-					ID:     chapterID,
-					Title:  title,
-					Number: chapterNumber,
-					Date:   date,
+					ID:       chapterID,
+					Title:    title,
+					Number:   chapterNumber,
+					Date:     date,
+					Language: language,
 				}
 
 				chapters = append(chapters, chapter)
@@ -1150,17 +1184,22 @@ func (p *Provider) extractChaptersFromPage(page *network.WebPage, mangaID string
 				// Get chapter title
 				title := strings.TrimSpace(elem.Text())
 
-				// Extract chapter number from title or URL
-				chapterNumber := parser.ExtractChapterNumber(title)
-				if chapterNumber == 0 {
-					chapterNumber = parser.ExtractChapterNumber(chapterID)
+				// Use the cascading parser to get the chapter number
+				chapterNumber := parser.CascadeParseChapterNumber(title, chapterID)
+
+				// Try to detect language from title
+				language := util.DetectLanguageFromText(title)
+				if language == nil {
+					// Try to detect from URL
+					language = util.DetectLanguageFromText(href)
 				}
 
 				chapter := core.ChapterInfo{
-					ID:     chapterID,
-					Title:  title,
-					Number: chapterNumber,
-					Date:   time.Now(), // We'd need more parsing to get the actual date
+					ID:       chapterID,
+					Title:    title,
+					Number:   chapterNumber,
+					Date:     nil, // No date information available from AJAX typically
+					Language: language,
 				}
 
 				chapters = append(chapters, chapter)
@@ -1237,6 +1276,13 @@ func (p *Provider) GetChapter(ctx context.Context, chapterID string) (*core.Chap
 	// If still no title, use page title
 	if chapter.Info.Title == "" {
 		chapter.Info.Title = page.GetTitle()
+	}
+
+	// Try to detect language from title
+	chapter.Info.Language = util.DetectLanguageFromText(chapter.Info.Title)
+	if chapter.Info.Language == nil {
+		// Try to detect from URL
+		chapter.Info.Language = util.DetectLanguageFromText(chapterURL)
 	}
 
 	// Try multiple selectors for images

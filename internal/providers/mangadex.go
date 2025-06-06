@@ -30,6 +30,9 @@ type MgdMangaResp struct {
 					Name map[string]string `json:"name"`
 				} `json:"attributes"`
 			} `json:"tags"`
+			LastChapter string `json:"lastChapter"`
+			LastVolume  string `json:"lastVolume"`
+			UpdatedAt   string `json:"updatedAt"` // Last updated timestamp
 		} `json:"attributes"`
 		Relationships []struct {
 			ID         string `json:"id"`
@@ -45,10 +48,11 @@ type MgdChapterResp struct {
 	Data struct {
 		ID         string `json:"id"`
 		Attributes struct {
-			Title     string    `json:"title"`
-			Chapter   string    `json:"chapter"`
-			Volume    string    `json:"volume"`
-			PublishAt time.Time `json:"publishAt"`
+			Title              string    `json:"title"`
+			Chapter            string    `json:"chapter"`
+			Volume             string    `json:"volume"`
+			PublishAt          time.Time `json:"publishAt"`
+			TranslatedLanguage string    `json:"translatedLanguage"` // Language code (e.g., "en", "ja")
 		} `json:"attributes"`
 		Relationships []struct {
 			ID   string `json:"id"`
@@ -69,10 +73,11 @@ type MgdChapterListResp struct {
 	Data []struct {
 		ID         string `json:"id"`
 		Attributes struct {
-			Title     string    `json:"title"`
-			Chapter   string    `json:"chapter"`
-			Volume    string    `json:"volume"`
-			PublishAt time.Time `json:"publishAt"`
+			Title              string    `json:"title"`
+			Chapter            string    `json:"chapter"`
+			Volume             string    `json:"volume"`
+			PublishAt          time.Time `json:"publishAt"`
+			TranslatedLanguage string    `json:"translatedLanguage"` // Language code
 		} `json:"attributes"`
 	} `json:"data"`
 	Total  int `json:"total"`
@@ -122,6 +127,90 @@ type MangadexProvider struct {
 	engine *engine.Engine
 }
 
+// languageCodeToName maps language codes to readable names
+var languageCodeToName = map[string]string{
+	"en": "English",
+	"ja": "Japanese",
+	"es": "Spanish",
+	"fr": "French",
+	"de": "German",
+	"pt": "Portuguese",
+	"ru": "Russian",
+	"ko": "Korean",
+	"zh": "Chinese",
+	"it": "Italian",
+	"ar": "Arabic",
+	"tr": "Turkish",
+	"th": "Thai",
+	"vi": "Vietnamese",
+	"id": "Indonesian",
+	"pl": "Polish",
+	"nl": "Dutch",
+	"sv": "Swedish",
+	"da": "Danish",
+	"no": "Norwegian",
+	"fi": "Finnish",
+	"hu": "Hungarian",
+	"cs": "Czech",
+	"sk": "Slovak",
+	"bg": "Bulgarian",
+	"hr": "Croatian",
+	"sr": "Serbian",
+	"sl": "Slovenian",
+	"et": "Estonian",
+	"lv": "Latvian",
+	"lt": "Lithuanian",
+	"ro": "Romanian",
+	"el": "Greek",
+	"he": "Hebrew",
+	"fa": "Persian",
+	"hi": "Hindi",
+	"bn": "Bengali",
+	"ta": "Tamil",
+	"te": "Telugu",
+	"ml": "Malayalam",
+	"kn": "Kannada",
+	"gu": "Gujarati",
+	"pa": "Punjabi",
+	"ur": "Urdu",
+}
+
+// convertLanguageCode converts a language code to a standardized format
+func convertLanguageCode(code string) *string {
+	if code == "" {
+		return nil
+	}
+
+	return &code
+}
+
+// parseNullableTime safely parses a time field, returning nil if empty or invalid
+func parseNullableTime(timeStr string) *time.Time {
+	if timeStr == "" {
+		return nil
+	}
+
+	// Try parsing RFC3339 format first (common for APIs)
+	if t, err := time.Parse(time.RFC3339, timeStr); err == nil {
+		return &t
+	}
+
+	// Try other common formats
+	formats := []string{
+		"2006-01-02T15:04:05Z",
+		"2006-01-02 15:04:05",
+		"2006-01-02",
+	}
+
+	for _, format := range formats {
+		if t, err := time.Parse(format, timeStr); err == nil {
+			return &t
+		}
+	}
+
+	return nil
+}
+
 // Initialize overrides the base provider's Initialize method
 func (m *MangadexProvider) Initialize(ctx context.Context) error {
 	return common.ExecuteInitialize(ctx, m.engine, m.ID(), m.Name(), func(ctx context.Context) error {
@@ -137,7 +226,7 @@ func NewMangadexProvider(e *engine.Engine) provider.Provider {
 	// Create state with initial server network
 	state := &MangaDexState{
 		ServerNetwork: []string{
-			"https://uploads.mangadex.org/data/",
+			"https://uploads.MangaDex.org/data/",
 		},
 	}
 
@@ -282,12 +371,22 @@ func processChapters(state *MangaDexState) api.ProcessChaptersFunc {
 				}
 			}
 
+			// Handle nullable date
+			var publishDate *time.Time
+			if !item.Attributes.PublishAt.IsZero() {
+				publishDate = &item.Attributes.PublishAt
+			}
+
+			// Handle language
+			language := convertLanguageCode(item.Attributes.TranslatedLanguage)
+
 			// Create the chapter info
 			chapterInfo := core.ChapterInfo{
-				ID:     item.ID,
-				Title:  title,
-				Number: chapterNum,
-				Date:   item.Attributes.PublishAt,
+				ID:       item.ID,
+				Title:    title,
+				Number:   chapterNum,
+				Date:     publishDate,
+				Language: language,
 			}
 
 			chapters = append(chapters, chapterInfo)
@@ -326,8 +425,13 @@ func createChapterProcessor(e *engine.Engine, state *MangaDexState) api.Response
 			}
 		}
 
-		// Set publication date
-		chapter.Info.Date = chapterResp.Data.Attributes.PublishAt
+		// Handle nullable publication date
+		if !chapterResp.Data.Attributes.PublishAt.IsZero() {
+			chapter.Info.Date = &chapterResp.Data.Attributes.PublishAt
+		}
+
+		// Handle language
+		chapter.Info.Language = convertLanguageCode(chapterResp.Data.Attributes.TranslatedLanguage)
 
 		// Extract manga ID from relationships
 		for _, rel := range chapterResp.Data.Relationships {
@@ -555,6 +659,18 @@ func configureExtractors() map[string]parser.ExtractorSet {
 				Required:   false,
 			},
 			{
+				Name:       "LastUpdated",
+				SourcePath: []string{"Data", "Attributes", "UpdatedAt"},
+				TargetPath: "LastUpdated",
+				Transform: func(value interface{}) interface{} {
+					if timeStr, ok := value.(string); ok {
+						return parseNullableTime(timeStr)
+					}
+					return nil
+				},
+				Required: false,
+			},
+			{
 				Name:       "Tags",
 				SourcePath: []string{"Data", "Attributes", "Tags"},
 				TargetPath: "Tags",
@@ -674,7 +790,25 @@ func configureExtractors() map[string]parser.ExtractorSet {
 				Name:       "Date",
 				SourcePath: []string{"Data", "Attributes", "PublishAt"},
 				TargetPath: "Info.Date",
-				Required:   false,
+				Transform: func(value interface{}) interface{} {
+					if timeVal, ok := value.(time.Time); ok && !timeVal.IsZero() {
+						return &timeVal
+					}
+					return nil
+				},
+				Required: false,
+			},
+			{
+				Name:       "Language",
+				SourcePath: []string{"Data", "Attributes", "TranslatedLanguage"},
+				TargetPath: "Info.Language",
+				Transform: func(value interface{}) interface{} {
+					if langCode, ok := value.(string); ok {
+						return convertLanguageCode(langCode)
+					}
+					return nil
+				},
+				Required: false,
 			},
 		},
 	}

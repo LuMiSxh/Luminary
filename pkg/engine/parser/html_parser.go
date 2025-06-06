@@ -160,6 +160,57 @@ func (e *Element) FindOne(selector string) (*Element, error) {
 	return e.DOM.QuerySelectorWithContext(e.Node, selector)
 }
 
+// Parent returns the parent element of this element
+func (e *Element) Parent() *Element {
+	if e.Node == nil || e.Node.Parent == nil {
+		return nil
+	}
+
+	return &Element{Node: e.Node.Parent, DOM: e.DOM}
+}
+
+// NextSibling returns the next sibling element
+func (e *Element) NextSibling() *Element {
+	if e.Node == nil || e.Node.NextSibling == nil {
+		return nil
+	}
+
+	return &Element{Node: e.Node.NextSibling, DOM: e.DOM}
+}
+
+// PrevSibling returns the previous sibling element
+func (e *Element) PrevSibling() *Element {
+	if e.Node == nil || e.Node.PrevSibling == nil {
+		return nil
+	}
+
+	return &Element{Node: e.Node.PrevSibling, DOM: e.DOM}
+}
+
+// FindSiblings finds elements that are siblings of this element and match the selector
+func (e *Element) FindSiblings(selector string) ([]*Element, error) {
+	if e.Node == nil || e.Node.Parent == nil {
+		return nil, fmt.Errorf("element has no parent")
+	}
+
+	// Get all matching elements from parent
+	parentElement := &Element{Node: e.Node.Parent, DOM: e.DOM}
+	allElements, err := parentElement.Find(selector)
+	if err != nil {
+		return nil, err
+	}
+
+	// Filter out this element and keep only siblings
+	var siblings []*Element
+	for _, element := range allElements {
+		if element.Node != e.Node {
+			siblings = append(siblings, element)
+		}
+	}
+
+	return siblings, nil
+}
+
 // parseSelector is a helper function that implements CSS selector parsing
 func (d *DOMService) parseSelector(root *html.Node, selector string, firstOnly bool) ([]*html.Node, error) {
 	// Handle complex selectors
@@ -656,8 +707,45 @@ func (d *DOMService) ExtractMetaTags(doc *html.Node) map[string]string {
 	return result
 }
 
+// CascadeParseChapterNumber tries multiple methods to extract a chapter number
+// from title and ID, returning the first successful result or 0 if all fail
+func CascadeParseChapterNumber(title, chapterID string) float64 {
+	// Try extracting from title using standard method first
+	chapterNumber := ExtractChapterNumber(title)
+	if chapterNumber > 0 {
+		return chapterNumber
+	}
+
+	// If that fails, try specialized URL extraction
+	chapterNumber = extractChapterNumberFromURL(chapterID)
+	if chapterNumber > 0 {
+		return chapterNumber
+	}
+
+	// If that fails too, try direct title pattern matching
+	chapterNumber = extractChapterNumberFromTitle(title)
+	if chapterNumber > 0 {
+		return chapterNumber
+	}
+
+	// All methods failed, return 0
+	return 0
+}
+
 // ExtractChapterNumber extracts the chapter number from a string
 func ExtractChapterNumber(text string) float64 {
+	// Special case for KissManga-style "chapter XX.Y" format
+	kissMangaPattern := regexp.MustCompile(`(?i)chapter\s+(\d+)\.(\d+)`)
+	matches := kissMangaPattern.FindStringSubmatch(text)
+	if len(matches) > 2 {
+		whole, err1 := strconv.ParseFloat(matches[1], 64)
+		decimal, err2 := strconv.ParseFloat("."+matches[2], 64)
+
+		if err1 == nil && err2 == nil {
+			return whole + decimal
+		}
+	}
+
 	// Common patterns for chapter numbers
 	patterns := []string{
 		`(?i)chapter\s*(\d+(\.\d+)?)`,
@@ -671,16 +759,9 @@ func ExtractChapterNumber(text string) float64 {
 		matches := re.FindStringSubmatch(text)
 
 		if len(matches) > 0 {
-			// Find the group containing the number
-			var numberStr string
-			if len(matches) >= 3 && matches[2] != "" {
-				numberStr = matches[2]
-			} else if matches[1] != "" {
-				numberStr = matches[1]
-			}
-
-			if numberStr != "" {
-				number, err := strconv.ParseFloat(numberStr, 64)
+			// Always prefer the first capture group, which should contain the full number
+			if matches[1] != "" {
+				number, err := strconv.ParseFloat(matches[1], 64)
 				if err == nil {
 					return number
 				}
@@ -689,6 +770,147 @@ func ExtractChapterNumber(text string) float64 {
 	}
 
 	return 0
+}
+
+// extractChapterNumberFromURL extracts chapter numbers from URLs
+// which commonly follow patterns like "ch-123" or "chapter-123" in the URL
+func extractChapterNumberFromURL(chapterID string) float64 {
+	// KissManga specific pattern: chapter-XX-Y for chapter XX.Y
+	re := regexp.MustCompile(`chapter-(\d+)-(\d+)`)
+	matches := re.FindStringSubmatch(chapterID)
+	if len(matches) > 2 {
+		whole, err1 := strconv.ParseFloat(matches[1], 64)
+		decimal, err2 := strconv.ParseFloat("."+matches[2], 64)
+
+		if err1 == nil && err2 == nil {
+			return whole + decimal
+		}
+	}
+
+	// ch-XX-Y pattern
+	re = regexp.MustCompile(`ch-(\d+)-(\d+)`)
+	matches = re.FindStringSubmatch(chapterID)
+	if len(matches) > 2 {
+		whole, err1 := strconv.ParseFloat(matches[1], 64)
+		decimal, err2 := strconv.ParseFloat("."+matches[2], 64)
+
+		if err1 == nil && err2 == nil {
+			return whole + decimal
+		}
+	}
+
+	// If the specific patterns didn't match, try other common patterns
+	patterns := []*regexp.Regexp{
+		regexp.MustCompile(`ch-(\d+(?:\.\d+)?)`),      // matches ch-123 or ch-123.5
+		regexp.MustCompile(`chapter-(\d+(?:\.\d+)?)`), // matches chapter-123 or chapter-123.5
+		regexp.MustCompile(`chap-(\d+(?:\.\d+)?)`),    // matches chap-123 or similar
+		regexp.MustCompile(`c-(\d+(?:\.\d+)?)`),       // matches c-123 or similar
+	}
+
+	// Try each pattern
+	for _, pattern := range patterns {
+		matches := pattern.FindStringSubmatch(chapterID)
+		if len(matches) > 1 {
+			// Parse as a regular float
+			if num, err := strconv.ParseFloat(matches[1], 64); err == nil {
+				return num
+			}
+		}
+	}
+
+	// No matches found with our special patterns, return 0
+	return 0
+}
+
+// extractChapterNumberFromTitle attempts to extract chapter number from title patterns
+// like "Ch. 3 - Title" or "Chapter 3.5: Title"
+func extractChapterNumberFromTitle(title string) float64 {
+	// First check specifically for "chapter X.Y" patterns (used by KissManga)
+	decimalPattern := regexp.MustCompile(`(?i)chapter\s+(\d+)\.(\d+)`)
+	matches := decimalPattern.FindStringSubmatch(title)
+	if len(matches) > 2 {
+		whole, err1 := strconv.ParseFloat(matches[1], 64)
+		decimal, err2 := strconv.ParseFloat("."+matches[2], 64)
+
+		if err1 == nil && err2 == nil {
+			return whole + decimal
+		}
+	}
+
+	// Also check for hyphenated decimal format (chapter 16-5)
+	hyphenPattern := regexp.MustCompile(`(?i)chapter\s+(\d+)-(\d+)`)
+	matches = hyphenPattern.FindStringSubmatch(title)
+	if len(matches) > 2 {
+		whole, err1 := strconv.ParseFloat(matches[1], 64)
+		decimal, err2 := strconv.ParseFloat("."+matches[2], 64)
+
+		if err1 == nil && err2 == nil {
+			return whole + decimal
+		}
+	}
+
+	// Common patterns for chapter numbers in titles
+	patterns := []*regexp.Regexp{
+		regexp.MustCompile(`(?i)^chapter\s+(\d+(?:\.\d+)?)`),            // "chapter 123" or "chapter 123.5"
+		regexp.MustCompile(`(?i)^ch\.\s+(\d+(?:\.\d+)?)`),               // "Ch. 123" or "Ch. 123.5"
+		regexp.MustCompile(`(?i)^vol\.\s+\d+\s+ch\.\s+(\d+(?:\.\d+)?)`), // "Vol. 1 Ch. 123"
+	}
+
+	for _, pattern := range patterns {
+		matches := pattern.FindStringSubmatch(title)
+		if len(matches) > 1 && matches[1] != "" {
+			if num, err := strconv.ParseFloat(matches[1], 64); err == nil {
+				return num
+			}
+		}
+	}
+
+	return 0
+}
+
+// GetElementHTML returns the HTML representation of a node for debugging
+func GetElementHTML(n *html.Node) string {
+	if n == nil {
+		return ""
+	}
+
+	var buf strings.Builder
+
+	// Handle element nodes
+	if n.Type == html.ElementNode {
+		buf.WriteString("<")
+		buf.WriteString(n.Data)
+
+		// Write attributes
+		for _, attr := range n.Attr {
+			buf.WriteString(" ")
+			buf.WriteString(attr.Key)
+			buf.WriteString("=\"")
+			buf.WriteString(attr.Val)
+			buf.WriteString("\"")
+		}
+
+		if n.FirstChild == nil {
+			buf.WriteString(" />")
+			return buf.String()
+		}
+
+		buf.WriteString(">")
+
+		// Recursively process child nodes
+		for child := n.FirstChild; child != nil; child = child.NextSibling {
+			buf.WriteString(GetElementHTML(child))
+		}
+
+		buf.WriteString("</")
+		buf.WriteString(n.Data)
+		buf.WriteString(">")
+	} else if n.Type == html.TextNode {
+		// For text nodes, just append the text
+		buf.WriteString(n.Data)
+	}
+
+	return buf.String()
 }
 
 // UrlJoin joins URL parts

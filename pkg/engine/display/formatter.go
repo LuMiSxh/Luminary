@@ -23,6 +23,7 @@ import (
 	"fmt"
 	"sort"
 	"strings"
+	"time"
 )
 
 // Level defines the level of detail for displaying information
@@ -101,6 +102,23 @@ func formatLimitedList(label string, items []string, limit int) string {
 	return fmt.Sprintf("%s: %s%s", label, strings.Join(limitedItems, ", "), suffix)
 }
 
+// formatNullableDate formats a nullable date, returning a user-friendly string
+func formatNullableDate(date *time.Time) string {
+	if date == nil {
+		return "Not specified"
+	}
+	return util.FormatDate(*date)
+}
+
+// formatNullableLanguage formats a nullable language, returning a user-friendly string
+func formatNullableLanguage(language *string) string {
+	if language == nil {
+		return "Not specified"
+	}
+	// Use the language code directly
+	return *language
+}
+
 // --- Primary Formatting Functions ---
 
 // Manga formats and prints manga information according to the specified options
@@ -171,14 +189,14 @@ func Chapter(chapter core.ChapterInfo, providerID string, options Options) strin
 	appendLine(&output, options, 0, "%s (ID: %s)", title, chapterID)
 
 	// Detail lines (indented) - Chapter details are usually minimal or standard
-	// We always show Chapter Number and Date if available, regardless of Level
+	// We always show Chapter Number, Date, and Language if available, regardless of Level
 	// as they are fundamental to a chapter.
 
 	// Format date
-	dateStr := "Unknown date"
-	if !chapter.Date.IsZero() {
-		dateStr = util.FormatDate(chapter.Date)
-	}
+	dateStr := formatNullableDate(chapter.Date)
+
+	// Format language
+	langStr := formatNullableLanguage(chapter.Language)
 
 	// Format chapter number
 	chapterNum := "?"
@@ -186,12 +204,7 @@ func Chapter(chapter core.ChapterInfo, providerID string, options Options) strin
 		chapterNum = fmt.Sprintf("%g", chapter.Number) // Use %g for clean number formatting
 	}
 
-	appendLine(&output, options, 1, "Chapter %s | Released: %s", chapterNum, dateStr)
-
-	// Potentially add Scanlation Group if Level is Detailed and field exists
-	// if options.Level >= Detailed && chapter.ScanlationGroup != "" {
-	//     appendLine(&output, options, 1, "Group: %s", chapter.ScanlationGroup)
-	// }
+	appendLine(&output, options, 1, "Chapter %s | Released: %s | Language: %s", chapterNum, dateStr, langStr)
 
 	return output.String()
 }
@@ -226,6 +239,13 @@ func MangaInfo(manga *core.MangaInfo, provider provider.Provider, mainOptions Op
 	for _, line := range strings.Split(strings.TrimSuffix(mangaDetails, "\n"), "\n") {
 		output.WriteString(mainOptions.Indent + line + "\n")
 	}
+
+	// Display last updated information if available
+	if mainOptions.Level >= Detailed && manga.LastUpdated != nil {
+		lastUpdatedStr := formatNullableDate(manga.LastUpdated)
+		output.WriteString(fmt.Sprintf("%s%sLast Updated: %s\n", mainOptions.Prefix, mainOptions.Indent+mainOptions.Indent, lastUpdatedStr))
+	}
+
 	// Display full description separately if needed (Manga formatter truncates)
 	if mainOptions.Level >= Detailed && manga.Description != "" {
 		descHeader := fmt.Sprintf("%s%sDescription:", mainOptions.Prefix, mainOptions.Indent+mainOptions.Indent)

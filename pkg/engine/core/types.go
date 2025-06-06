@@ -35,15 +35,17 @@ type Manga struct {
 // MangaInfo contains detailed manga information
 type MangaInfo struct {
 	Manga
-	Chapters []ChapterInfo
+	Chapters    []ChapterInfo
+	LastUpdated *time.Time // When the manga info was last updated on the source
 }
 
 // ChapterInfo represents chapter metadata
 type ChapterInfo struct {
-	ID     string
-	Title  string
-	Number float64
-	Date   time.Time
+	ID       string
+	Title    string
+	Number   float64
+	Date     *time.Time // Nullable date - nil when no date is available
+	Language *string    // Nullable language - nil when language is not specified
 }
 
 // Chapter contains detailed chapter information
