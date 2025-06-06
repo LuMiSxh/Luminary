@@ -92,7 +92,6 @@ jobs:
           
           cp README.md release/
           cp RPC_Doc.md release/
-          cp Api_Doc.md release/
           cd release
           tar -czf ../luminary-${{ github.event.inputs.version }}-${{ matrix.target }}.tar.gz *
           cd ..
@@ -106,7 +105,6 @@ jobs:
           
           cp README.md release/
           cp RPC_Doc.md release/
-          cp Api_Doc.md release/
           cd release
           7z a -tzip ../luminary-${{ github.event.inputs.version }}-${{ matrix.target }}.zip *
           cd ..
