@@ -61,10 +61,9 @@ const (
 	ErrCodeProviderError    = -1103
 
 	// Operation errors (1200-1299)
-	ErrCodeSearchFailed   = -1201
-	ErrCodeFetchFailed    = -1202
-	ErrCodeDownloadFailed = -1203
-	ErrCodeListFailed     = -1204
+	ErrCodeSearchFailed = -1201
+	ErrCodeFetchFailed  = -1202
+	ErrCodeListFailed   = -1203
 
 	// Network errors (2000-2099)
 	ErrCodeNetworkUnavailable = -2001
