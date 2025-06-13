@@ -1,0 +1,95 @@
+{
+  "network": [
+    "Check your internet connection",
+    "Verify the service is accessible",
+    "Try again in a few moments",
+    "Consider using a different network"
+  ],
+  "network_no_such_host": [
+    "DNS resolution failed - check your DNS settings",
+    "The server domain may be misspelled or no longer exists",
+    "Try using an IP address instead of a domain name if possible"
+  ],
+  "network_connection_refused": [
+    "Server is not responding - the service may be down",
+    "A firewall might be blocking the connection",
+    "The service might be running on a different port"
+  ],
+  "network_timeout": [
+    "Request timed out - try again with a slower connection",
+    "The server might be overloaded",
+    "Try increasing the timeout in settings"
+  ],
+  "network_tls": [
+    "SSL/TLS certificate issue - check system date/time",
+    "The server's certificate might be invalid or expired",
+    "Your system might not trust the certificate authority"
+  ],
+  "provider": [
+    "Try a different provider",
+    "Check if the provider's website is accessible",
+    "Try again later",
+    "The provider might have changed their API"
+  ],
+  "not_found": [
+    "Check the ID/URL is correct",
+    "Try searching for the content",
+    "The content may have been removed or moved",
+    "Verify you have the correct permissions to access this resource"
+  ],
+  "rate_limit": [
+    "Wait a few minutes before trying again",
+    "Reduce the number of concurrent requests",
+    "Consider using a different provider",
+    "Check if authentication would increase your rate limits"
+  ],
+  "auth": [
+    "Check if the provider requires registration",
+    "Verify your credentials (if applicable)",
+    "The provider may have restricted access",
+    "Your session might have expired - try logging in again"
+  ],
+  "parsing": [
+    "The provider changed their API format",
+    "The response was corrupted",
+    "This may be a temporary issue - try again later",
+    "Check for updates to Luminary that might fix this issue"
+  ],
+  "file_system_permission": [
+    "Check file/directory permissions",
+    "Run with appropriate privileges",
+    "Choose a different output directory",
+    "Close any applications that might be using the file"
+  ],
+  "file_system_no_space": [
+    "Free up disk space",
+    "Choose a different output directory",
+    "Clean up old downloads",
+    "Check if disk quotas are enforced on your system"
+  ],
+  "file_system_no_such_file": [
+    "Check the path exists",
+    "Create the directory if needed",
+    "Verify file permissions",
+    "Ensure the filename doesn't contain invalid characters"
+  ],
+  "file_system": [
+    "Check file/directory permissions",
+    "Ensure sufficient disk space",
+    "Verify the path is correct",
+    "Check if the filesystem is mounted properly"
+  ],
+  "download": [
+    "Check your internet connection",
+    "Ensure sufficient disk space",
+    "Try downloading to a different location",
+    "Retry the download",
+    "The content might have been removed from the server"
+  ],
+  "timeout": [
+    "Try again with a slower connection",
+    "Reduce the number of concurrent operations",
+    "The service may be experiencing high load",
+    "Consider increasing the timeout in the configuration"
+  ]
+}
