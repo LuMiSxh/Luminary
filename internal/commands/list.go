@@ -17,13 +17,12 @@
 package commands
 
 import (
+	"Luminary/pkg/cli"
 	"Luminary/pkg/engine/core"
-	"Luminary/pkg/engine/display"
 	"Luminary/pkg/errors"
 	"Luminary/pkg/provider"
 	"context"
 	"fmt"
-	"os"
 	"sync"
 	"time"
 
@@ -67,9 +66,7 @@ var listCmd = &cobra.Command{
 			selectedProvider, exists = appEngine.GetProvider(listProvider)
 			if !exists {
 				providerErr := fmt.Errorf("provider '%s' not found", listProvider)
-				if _, err := fmt.Fprintf(os.Stderr, "%s\n", errors.FormatCLI(errors.T(providerErr))); err != nil {
-					return
-				}
+				formatter.HandleError(providerErr)
 				return
 			}
 		}
@@ -81,38 +78,42 @@ var listCmd = &cobra.Command{
 			// We use empty search to get a list of manga
 		}
 
+		// Use the unified formatter
+		formatter := cli.DefaultFormatter
+
 		if selectedProvider != nil {
 			// Single provider case - no need for parallelism
-			fmt.Printf("Listing manga from provider: %s (%s)\n", selectedProvider.ID(), selectedProvider.Name())
-			fmt.Printf("Limit: %d manga per page\n", options.Limit)
+			formatter.PrintHeader(fmt.Sprintf("Manga from %s (%s)", selectedProvider.ID(), selectedProvider.Name()))
+			formatter.PrintDetail("Limit", fmt.Sprintf("%d manga per page", options.Limit))
+
 			if options.Pages > 0 {
-				fmt.Printf("Pages: %d\n", options.Pages)
+				formatter.PrintDetail("Pages", fmt.Sprintf("%d", options.Pages))
 			} else {
-				fmt.Println("Pages: all available")
+				formatter.PrintDetail("Pages", "all available")
 			}
-			fmt.Println()
+
+			formatter.PrintNewLine()
 
 			// Use empty search to get the list of manga
 			mangas, err := selectedProvider.Search(ctx, "", options)
-			if err != nil {
-				if _, err := fmt.Fprintln(os.Stderr, errors.FormatCLI(err)); err != nil {
-					return
-				}
+			if formatter.HandleError(err) {
 				return
 			}
 
-			displayMangaList(mangas, selectedProvider)
+			formatter.PrintMangaList(mangas, selectedProvider, "")
 		} else {
 			// Multiple providers - use parallel processing
-			fmt.Println("Listing manga from all providers:")
-			fmt.Printf("Limit: %d manga per page\n", options.Limit)
+			formatter.PrintHeader("Manga from All Providers")
+			formatter.PrintDetail("Limit", fmt.Sprintf("%d manga per page", options.Limit))
+
 			if options.Pages > 0 {
-				fmt.Printf("Pages: %d\n", options.Pages)
+				formatter.PrintDetail("Pages", fmt.Sprintf("%d", options.Pages))
 			} else {
-				fmt.Println("Pages: all available")
+				formatter.PrintDetail("Pages", "all available")
 			}
-			fmt.Printf("Concurrency: %d\n", maxConcurrency)
-			fmt.Println("\nFetching data from providers in parallel. Results will appear as they complete...")
+
+			formatter.PrintDetail("Concurrency", fmt.Sprintf("%d", maxConcurrency))
+			formatter.PrintInfo("Fetching data from providers in parallel. Results will appear as they complete...")
 
 			// Create synchronization primitives
 			var wg sync.WaitGroup
@@ -139,17 +140,14 @@ var listCmd = &cobra.Command{
 					mu.Lock()
 					defer mu.Unlock()
 
-					fmt.Printf("\n--- From provider: %s (%s) ---\n", p.ID(), p.Name())
+					formatter.PrintSection(fmt.Sprintf("From provider: %s (%s)", p.ID(), p.Name()))
 
 					if err != nil {
-						if _, err := fmt.Fprintln(os.Stderr, errors.FormatCLI(err)); err != nil {
-							return
-						}
+						formatter.PrintError(errors.FormatCLI(err))
 						return
 					}
 
-					// Display results
-					displayMangaList(mangas, p)
+					formatter.PrintMangaList(mangas, p, "")
 				}(prov)
 			}
 
@@ -197,20 +195,4 @@ func calculateListTimeout(limit, pages int, multipleProviders bool) time.Duratio
 	}
 
 	return timeoutDuration
-}
-
-// Helper function to display a manga list in a user-friendly format
-func displayMangaList(mangas []core.Manga, provider provider.Provider) {
-	// Use the standardized engine display function
-	output := display.MangaList(mangas, provider)
-	fmt.Print(output)
-}
-
-func init() {
-	rootCmd.AddCommand(listCmd)
-
-	// Flags
-	listCmd.Flags().StringVar(&listProvider, "provider", "", "Specific provider to list manga from (default: all)")
-	listCmd.Flags().IntVar(&listLimit, "limit", 50, "Limit number of results per page (limit 0 for all)")
-	listCmd.Flags().IntVar(&listPages, "pages", 1, "Number of pages to fetch (0 for all pages)")
 }

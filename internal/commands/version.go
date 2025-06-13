@@ -17,8 +17,7 @@
 package commands
 
 import (
-	// "Luminary/pkg/util" // Removed as OutputJSON is no longer used
-	"fmt"
+	"Luminary/pkg/cli"
 	"github.com/spf13/cobra"
 	"runtime"
 )
@@ -28,21 +27,21 @@ var versionCmd = &cobra.Command{
 	Short: "Show version information",
 	Long:  `Display detailed version information for Luminary, including the log file location.`,
 	Run: func(cmd *cobra.Command, args []string) {
-		fmt.Printf("Luminary version: %s\n", version)
-		fmt.Printf("Go version: %s\n", runtime.Version())
-		fmt.Printf("OS/Arch: %s/%s\n", runtime.GOOS, runtime.GOARCH)
-
-		// Add log file location if available
+		// Get log file location if available
+		logFile := ""
 		if appEngine != nil && appEngine.Logger != nil {
-			logFile := appEngine.Logger.LogFile
-			if logFile != "" {
-				fmt.Printf("Log file: %s\n", logFile)
-			} else {
-				fmt.Println("Logging to file: disabled")
-			}
-		} else {
-			fmt.Println("Logger: not initialized")
+			logFile = appEngine.Logger.LogFile
 		}
+
+		// Use the unified formatter
+		formatter := cli.DefaultFormatter
+		formatter.PrintVersionInfo(
+			version,
+			runtime.Version(),
+			runtime.GOOS,
+			runtime.GOARCH,
+			logFile,
+		)
 	},
 }
 

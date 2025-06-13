@@ -21,6 +21,7 @@ import (
 	"Luminary/pkg/errors"
 	"context"
 	"encoding/json"
+	"fmt"
 	"io"
 	"net/http"
 	"net/url"
@@ -204,7 +205,7 @@ func (h *HTTPService) FetchWithRetries(ctx context.Context, url string, headers 
 	}
 
 	// Should never reach here, but just in case
-	return nil, errors.TN(errors.ErrServerError)
+	return nil, errors.TN(fmt.Errorf("HTTP request failed - Could be a network problem"))
 }
 
 // FetchJSON fetches and parses JSON with improved error handling

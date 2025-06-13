@@ -70,6 +70,44 @@ func TP(err error, providerID string) error {
 	return TrackProvider(err, providerID)
 }
 
+// WithCategory - Explicitly set the error category
+// Use this when you need to force a specific category
+func WithCategory(err error, category ErrorCategory) error {
+	if err == nil {
+		return nil
+	}
+
+	// First track the error
+	trackedErr := T(err)
+
+	// Then set the category explicitly
+	var te *TrackedError
+	if errors.As(trackedErr, &te) {
+		te.Category = category
+	}
+
+	return trackedErr
+}
+
+// ForceCategory - Force change the category of an existing error
+// Similar to WithCategory but doesn't add a new tracking point
+func ForceCategory(err error, category ErrorCategory) error {
+	if err == nil {
+		return nil
+	}
+
+	var te *TrackedError
+	if errors.As(err, &te) {
+		// Create a copy of the tracked error with the new category
+		newTE := *te
+		newTE.Category = category
+		return &newTE
+	}
+
+	// If not already tracked, track it with the specified category
+	return WithCategory(err, category)
+}
+
 // Join - Combine multiple errors into a single tracked error
 // Usage: err := errors.Join(err1, err2, err3)
 func Join(errs ...error) error {

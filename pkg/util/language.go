@@ -17,8 +17,10 @@
 package util
 
 import (
+	"fmt"
 	"regexp"
 	"strings"
+	"time"
 )
 
 // Language detection patterns for extracting language from titles and URLs
@@ -40,6 +42,62 @@ var languagePatterns = map[string]*regexp.Regexp{
 	"th": regexp.MustCompile(`(?i)\b(thai|ไทย|tha|th)\b`),
 	"vi": regexp.MustCompile(`(?i)\b(vietnamese|tiếng việt|vie|vi)\b`),
 	"id": regexp.MustCompile(`(?i)\b(indonesian|bahasa indonesia|ind|id)\b`),
+}
+
+// GetLanguageName returns the full name of a language from its code
+func GetLanguageName(code string) string {
+	// Try exact match first
+	if name, ok := languageCodeToFullName[code]; ok {
+		return name
+	}
+
+	// Try case-insensitive match
+	lowerCode := strings.ToLower(code)
+	for k, v := range languageCodeToFullName {
+		if strings.ToLower(k) == lowerCode {
+			return v
+		}
+	}
+
+	return ""
+}
+
+// FormatDate formats a date in a standard way
+func FormatDate(date time.Time) string {
+	now := time.Now()
+
+	// For recent dates, show relative time
+	if date.After(now.AddDate(0, 0, -7)) {
+		duration := now.Sub(date)
+
+		if duration < time.Hour {
+			minutes := int(duration.Minutes())
+			if minutes < 1 {
+				return "just now"
+			} else if minutes == 1 {
+				return "1 minute ago"
+			} else {
+				return fmt.Sprintf("%d minutes ago", minutes)
+			}
+		} else if duration < time.Hour*24 {
+			hours := int(duration.Hours())
+			if hours == 1 {
+				return "1 hour ago"
+			} else {
+				return fmt.Sprintf("%d hours ago", hours)
+			}
+		} else {
+			days := int(duration.Hours() / 24)
+			if days == 1 {
+				return "yesterday"
+			} else {
+				return fmt.Sprintf("%d days ago", days)
+			}
+		}
+	}
+
+	// For older dates, show full date
+	return date.Format("Jan 2, 2006")
 }
 
 // Additional patterns for scanlation groups that might indicate language
