@@ -125,6 +125,21 @@ func (e *TrackedError) Is(target error) bool {
 	return false
 }
 
+// GetOriginal returns the original error that started this chain
+func (e *TrackedError) GetOriginal() error {
+	return e.Original
+}
+
+// GetRootCause returns the deepest error in the chain
+func (e *TrackedError) GetRootCause() error {
+	return e.RootCause
+}
+
+// GetChain returns the full function call chain
+func (e *TrackedError) GetChain() []FunctionCall {
+	return e.CallChain
+}
+
 // GetFunctionChain returns the function call path as a string
 func (e *TrackedError) GetFunctionChain() string {
 	if len(e.CallChain) == 0 {
