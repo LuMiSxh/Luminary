@@ -873,13 +873,7 @@ func (p *Provider) GetManga(ctx context.Context, id string) (*core.MangaInfo, er
 	// Fetch the manga page
 	page, err := p.htmlProvider.FetchPage(ctx, parser.UrlJoin(p.config.SiteURL, id))
 	if err != nil {
-		return nil, &errors.ProviderError{
-			ProviderID:   p.ID(),
-			ResourceType: "manga",
-			ResourceID:   id,
-			Message:      "Failed to fetch manga page",
-			Err:          err,
-		}
+		return nil, errors.TP(err, p.ID())
 	}
 
 	// Get manga title (try multiple selectors)
@@ -1246,13 +1240,7 @@ func (p *Provider) GetChapter(ctx context.Context, chapterID string) (*core.Chap
 		cleanChapterUrl := util.CleanImageURL(chapterURL)
 		page, err = p.htmlProvider.FetchPage(ctx, cleanChapterUrl)
 		if err != nil {
-			return nil, &errors.ProviderError{
-				ProviderID:   p.ID(),
-				ResourceType: "chapter",
-				ResourceID:   chapterID,
-				Message:      "Failed to fetch chapter page",
-				Err:          err,
-			}
+			return nil, errors.TP(err, p.ID())
 		}
 	}
 
@@ -1364,7 +1352,7 @@ func (p *Provider) TryGetMangaForChapter(ctx context.Context, chapterID string) 
 	// Get the chapter to extract manga ID
 	chapter, err := p.GetChapter(ctx, chapterID)
 	if err != nil {
-		return nil, err
+		return nil, errors.TP(err, p.ID())
 	}
 
 	// If manga ID is available in chapter
@@ -1377,7 +1365,7 @@ func (p *Provider) TryGetMangaForChapter(ctx context.Context, chapterID string) 
 		return &mangaInfo.Manga, nil
 	}
 
-	return nil, fmt.Errorf("couldn't determine manga for chapter %s", chapterID)
+	return nil, errors.TP(fmt.Errorf("manga ID not found in chapter %s", chapterID), p.ID())
 }
 
 // DownloadChapter downloads a chapter

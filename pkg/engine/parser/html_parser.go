@@ -17,6 +17,7 @@
 package parser
 
 import (
+	"Luminary/pkg/errors"
 	"fmt"
 	"golang.org/x/net/html"
 	"regexp"
@@ -44,7 +45,7 @@ func (d *DOMService) Parse(content string) (*html.Node, error) {
 func (d *DOMService) ParseHTML(content string) (*Element, error) {
 	node, err := html.Parse(strings.NewReader(content))
 	if err != nil {
-		return nil, err
+		return nil, errors.T(err)
 	}
 
 	return &Element{Node: node, DOM: d}, nil
@@ -54,11 +55,11 @@ func (d *DOMService) ParseHTML(content string) (*Element, error) {
 func (d *DOMService) QuerySelector(node *html.Node, selector string) (*html.Node, error) {
 	elements, err := d.parseSelector(node, selector, true)
 	if err != nil {
-		return nil, err
+		return nil, errors.T(err)
 	}
 
 	if len(elements) == 0 {
-		return nil, fmt.Errorf("element not found: %s", selector)
+		return nil, errors.T(fmt.Errorf("element not found: %s", selector))
 	}
 
 	return elements[0], nil
@@ -73,7 +74,7 @@ func (d *DOMService) QuerySelectorAll(node *html.Node, selector string) ([]*html
 func (d *DOMService) QuerySelectorWithContext(root *html.Node, selector string) (*Element, error) {
 	elements, err := d.parseSelector(root, selector, true)
 	if err != nil {
-		return nil, err
+		return nil, errors.T(err)
 	}
 
 	if len(elements) == 0 {
@@ -87,7 +88,7 @@ func (d *DOMService) QuerySelectorWithContext(root *html.Node, selector string) 
 func (d *DOMService) QuerySelectorAllWithContext(root *html.Node, selector string) ([]*Element, error) {
 	nodes, err := d.parseSelector(root, selector, false)
 	if err != nil {
-		return nil, err
+		return nil, errors.T(err)
 	}
 
 	elements := make([]*Element, len(nodes))
@@ -145,7 +146,7 @@ func (e *Element) Text() string {
 // Find finds elements matching a CSS selector within this Element
 func (e *Element) Find(selector string) ([]*Element, error) {
 	if e.Node == nil {
-		return nil, fmt.Errorf("element is nil")
+		return nil, errors.T(fmt.Errorf("element is nil"))
 	}
 
 	return e.DOM.QuerySelectorAllWithContext(e.Node, selector)
@@ -154,7 +155,7 @@ func (e *Element) Find(selector string) ([]*Element, error) {
 // FindOne finds the first element matching a CSS selector within this Element
 func (e *Element) FindOne(selector string) (*Element, error) {
 	if e.Node == nil {
-		return nil, fmt.Errorf("element is nil")
+		return nil, errors.T(fmt.Errorf("element is nil"))
 	}
 
 	return e.DOM.QuerySelectorWithContext(e.Node, selector)
@@ -190,14 +191,14 @@ func (e *Element) PrevSibling() *Element {
 // FindSiblings finds elements that are siblings of this element and match the selector
 func (e *Element) FindSiblings(selector string) ([]*Element, error) {
 	if e.Node == nil || e.Node.Parent == nil {
-		return nil, fmt.Errorf("element has no parent")
+		return nil, errors.T(fmt.Errorf("element has no parent"))
 	}
 
 	// Get all matching elements from parent
 	parentElement := &Element{Node: e.Node.Parent, DOM: e.DOM}
 	allElements, err := parentElement.Find(selector)
 	if err != nil {
-		return nil, err
+		return nil, errors.T(err)
 	}
 
 	// Filter out this element and keep only siblings
@@ -226,16 +227,16 @@ func (d *DOMService) parseSelector(root *html.Node, selector string, firstOnly b
 func (d *DOMService) parseComplexSelector(root *html.Node, selector string, firstOnly bool) ([]*html.Node, error) {
 	parts := strings.Split(selector, " ")
 	if len(parts) == 0 {
-		return nil, fmt.Errorf("empty selector")
+		return nil, errors.T(fmt.Errorf("empty selector"))
 	}
 
 	// Find all elements matching the first part
 	currentMatches, err := d.parseSimpleSelector(root, parts[0], false)
 	if err != nil {
-		return nil, err
+		return nil, errors.T(err)
 	}
 
-	// For each subsequent part, find matching descendants
+	// For each following part, find matching descendants
 	for i := 1; i < len(parts); i++ {
 		if len(currentMatches) == 0 {
 			return nil, nil // No matches, return empty
@@ -628,7 +629,7 @@ func (d *DOMService) parseAttributeExistsSelector(root *html.Node, attrName stri
 func (d *DOMService) GetElementsByTagName(root *html.Node, tagName string) ([]*Element, error) {
 	nodes, err := d.parseSimpleSelector(root, tagName, false)
 	if err != nil {
-		return nil, err
+		return nil, errors.T(err)
 	}
 
 	elements := make([]*Element, len(nodes))
@@ -643,11 +644,11 @@ func (d *DOMService) GetElementsByTagName(root *html.Node, tagName string) ([]*E
 func (d *DOMService) GetElementById(root *html.Node, id string) (*Element, error) {
 	nodes, err := d.parseIDSelector(root, "#"+id, true)
 	if err != nil {
-		return nil, err
+		return nil, errors.T(err)
 	}
 
 	if len(nodes) == 0 {
-		return nil, fmt.Errorf("element with ID '%s' not found", id)
+		return nil, errors.T(fmt.Errorf("element with ID '%s' not found", id))
 	}
 
 	return &Element{Node: nodes[0], DOM: d}, nil
@@ -657,7 +658,7 @@ func (d *DOMService) GetElementById(root *html.Node, id string) (*Element, error
 func (d *DOMService) GetElementsByClassName(root *html.Node, className string) ([]*Element, error) {
 	nodes, err := d.parseClassSelector(root, "."+className, false)
 	if err != nil {
-		return nil, err
+		return nil, errors.T(err)
 	}
 
 	elements := make([]*Element, len(nodes))
@@ -672,7 +673,7 @@ func (d *DOMService) GetElementsByClassName(root *html.Node, className string) (
 func (d *DOMService) ExtractTextContent(htmlContent string) (string, error) {
 	doc, err := d.Parse(htmlContent)
 	if err != nil {
-		return "", err
+		return "", errors.T(err)
 	}
 
 	return d.GetText(doc), nil
@@ -866,51 +867,6 @@ func extractChapterNumberFromTitle(title string) float64 {
 	}
 
 	return 0
-}
-
-// GetElementHTML returns the HTML representation of a node for debugging
-func GetElementHTML(n *html.Node) string {
-	if n == nil {
-		return ""
-	}
-
-	var buf strings.Builder
-
-	// Handle element nodes
-	if n.Type == html.ElementNode {
-		buf.WriteString("<")
-		buf.WriteString(n.Data)
-
-		// Write attributes
-		for _, attr := range n.Attr {
-			buf.WriteString(" ")
-			buf.WriteString(attr.Key)
-			buf.WriteString("=\"")
-			buf.WriteString(attr.Val)
-			buf.WriteString("\"")
-		}
-
-		if n.FirstChild == nil {
-			buf.WriteString(" />")
-			return buf.String()
-		}
-
-		buf.WriteString(">")
-
-		// Recursively process child nodes
-		for child := n.FirstChild; child != nil; child = child.NextSibling {
-			buf.WriteString(GetElementHTML(child))
-		}
-
-		buf.WriteString("</")
-		buf.WriteString(n.Data)
-		buf.WriteString(">")
-	} else if n.Type == html.TextNode {
-		// For text nodes, just append the text
-		buf.WriteString(n.Data)
-	}
-
-	return buf.String()
 }
 
 // UrlJoin joins URL parts

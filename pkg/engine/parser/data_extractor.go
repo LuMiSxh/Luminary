@@ -18,9 +18,9 @@ package parser
 
 import (
 	"Luminary/pkg/engine/logger"
+	"Luminary/pkg/errors"
 	"fmt"
 	"reflect"
-	"strings"
 )
 
 // Extractor maps API response data to domain models
@@ -73,7 +73,7 @@ func (e *ExtractorService) Extract(extractorSet ExtractorSet, responseData inter
 		sourceValue, err := e.GetValueFromPath(responseData, extractor.SourcePath)
 		if err != nil {
 			if extractor.Required {
-				return nil, fmt.Errorf("required field extraction failed: %w", err)
+				return nil, errors.TM(err, "required field extraction failed")
 			}
 			e.Logger.Debug("Optional field extraction failed: %v", err)
 			continue
@@ -84,9 +84,9 @@ func (e *ExtractorService) Extract(extractorSet ExtractorSet, responseData inter
 			sourceValue = extractor.Transform(sourceValue)
 		}
 
-		// Set value in target model
+		// Set value in the target model
 		if err := e.setValueInPath(model, extractor.TargetPath, sourceValue); err != nil {
-			return nil, fmt.Errorf("failed to set value in target: %w", err)
+			return nil, errors.TM(err, "failed to set value in target model")
 		}
 	}
 
@@ -99,14 +99,14 @@ func (e *ExtractorService) ExtractList(extractorSet ExtractorSet, responseData i
 	listData, err := e.GetValueFromPath(responseData, listPath)
 	if err != nil {
 		e.Logger.Warn("Failed to extract list data from path %v: %v", listPath, err)
-		return nil, fmt.Errorf("failed to extract list data: %w", err)
+		return nil, errors.TM(err, "failed to extract list data from path")
 	}
 
 	// Ensure it's a slice
 	listValue := reflect.ValueOf(listData)
 	if listValue.Kind() != reflect.Slice {
 		e.Logger.Warn("Expected slice at path %v, got %T", listPath, listData)
-		return nil, fmt.Errorf("expected slice, got %T", listData)
+		return nil, errors.T(fmt.Errorf("expected slice at path %v, got %T", listPath, listData))
 	}
 
 	e.Logger.Debug("Found %d items at path %v", listValue.Len(), listPath)
@@ -141,7 +141,7 @@ func (e *ExtractorService) GetValueFromPath(data interface{}, path []string) (in
 	}
 
 	if data == nil {
-		return nil, fmt.Errorf("data is nil")
+		return nil, errors.T(fmt.Errorf("data is nil"))
 	}
 
 	value := reflect.ValueOf(data)
@@ -176,7 +176,7 @@ func (e *ExtractorService) GetValueFromPath(data interface{}, path []string) (in
 		// For structs, look up the field
 		field := value.FieldByName(current)
 		if !field.IsValid() {
-			return nil, fmt.Errorf("struct field not found: %s", current)
+			return nil, errors.T(fmt.Errorf("field not found: %s", current))
 		}
 
 		if len(rest) == 0 {
@@ -194,12 +194,10 @@ func (e *ExtractorService) GetValueFromPath(data interface{}, path []string) (in
 			return e.GetValueFromPath(item.Interface(), rest)
 		}
 
-		// Otherwise, look for objects with matching properties in the array
-		// (More complex logic could be implemented here)
-		return nil, fmt.Errorf("array/slice access not supported for path: %s", current)
+		return nil, errors.T(fmt.Errorf("slice of length %d != %d", len(rest), value.Len()))
 
 	default:
-		return nil, fmt.Errorf("cannot navigate path %s in %T", current, data)
+		return nil, errors.T(fmt.Errorf("cannot navigate path %s in %T", current, data))
 	}
 }
 
@@ -209,7 +207,7 @@ func (e *ExtractorService) setValueInPath(model interface{}, path string, value 
 
 	// Ensure we're working with a pointer
 	if modelValue.Kind() != reflect.Ptr {
-		return fmt.Errorf("model must be a pointer")
+		return errors.T(fmt.Errorf("expected pointer model, got %T", model))
 	}
 
 	// Dereference pointer
@@ -218,12 +216,12 @@ func (e *ExtractorService) setValueInPath(model interface{}, path string, value 
 	// Find the field
 	field := modelValue.FieldByName(path)
 	if !field.IsValid() {
-		return fmt.Errorf("field not found: %s", path)
+		return errors.T(fmt.Errorf("field not found: %s", path))
 	}
 
 	// Check if the field is settable
 	if !field.CanSet() {
-		return fmt.Errorf("field cannot be set: %s", path)
+		return errors.T(fmt.Errorf("cannot set field %s", path))
 	}
 
 	// Convert value to field type if possible
@@ -251,10 +249,7 @@ func (e *ExtractorService) setValueInPath(model interface{}, path string, value 
 		return nil
 	}
 
-	// Handle special cases for slices, maps, etc.
-	// Depending on your domain models, you may need to add more conversions
-
-	return fmt.Errorf("cannot assign %T to field %s of type %s", value, path, field.Type())
+	return errors.T(fmt.Errorf("cannot set value of path %s of kind %s", path, field.Kind()))
 }
 
 // Helper function to parse a string as an integer
@@ -262,25 +257,4 @@ func parseInt(s string) (int, error) {
 	var result int
 	_, err := fmt.Sscanf(s, "%d", &result)
 	return result, err
-}
-
-// CreateExtractor is a helper to create a new extractor
-func CreateExtractor(name string, sourcePath []string, targetPath string, transform func(interface{}) interface{}, required bool) Extractor {
-	return Extractor{
-		Name:       name,
-		SourcePath: sourcePath,
-		TargetPath: targetPath,
-		Transform:  transform,
-		Required:   required,
-	}
-}
-
-// JoinSourcePath is a helper to join source paths for readability
-func JoinSourcePath(parts ...string) []string {
-	return parts
-}
-
-// SplitSourcePath is a helper to split a dot-separated path
-func SplitSourcePath(path string) []string {
-	return strings.Split(path, ".")
 }

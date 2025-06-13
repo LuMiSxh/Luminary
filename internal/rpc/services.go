@@ -150,11 +150,12 @@ type SearchResponse struct {
 
 // Search performs a manga search based on the provided request.
 func (s *SearchService) Search(args *SearchRequest, reply *SearchResponse) error {
+	// Input validation (unchanged)
 	if args.Limit <= 0 {
 		args.Limit = 10
 	}
 	if args.Pages <= 0 {
-		args.Pages = 1 // Default to 1 page, 0 can mean all in some contexts but here 1 is safer default.
+		args.Pages = 1
 	}
 	if args.Sort == "" {
 		args.Sort = "relevance"
@@ -164,16 +165,12 @@ func (s *SearchService) Search(args *SearchRequest, reply *SearchResponse) error
 	}
 
 	options := core.SearchOptions{
-		Limit:   args.Limit,
-		Pages:   args.Pages,
-		Fields:  args.Fields,
-		Filters: args.Filters,
-		Sort:    args.Sort,
+		Limit: args.Limit, Pages: args.Pages, Fields: args.Fields,
+		Filters: args.Filters, Sort: args.Sort,
 	}
 
 	multipleProviders := args.Provider == ""
 	timeoutDuration := calculateSearchTimeout(args.Limit, args.Pages, multipleProviders)
-
 	ctx, cancel := context.WithTimeout(context.Background(), timeoutDuration)
 	defer cancel()
 	ctx = core.WithConcurrency(ctx, args.Concurrency)
@@ -182,11 +179,7 @@ func (s *SearchService) Search(args *SearchRequest, reply *SearchResponse) error
 	if args.Provider != "" {
 		p, exists := s.Services.engine.GetProvider(args.Provider)
 		if !exists {
-			return &Error{
-				Code:    ErrCodeProviderNotFound,
-				Message: fmt.Sprintf("Provider '%s' not found", args.Provider),
-				Data:    map[string]interface{}{"provider": args.Provider},
-			}
+			return ProviderNotFound(args.Provider) // ← SIMPLE!
 		}
 		providersToSearch = append(providersToSearch, p)
 	} else {
@@ -195,37 +188,28 @@ func (s *SearchService) Search(args *SearchRequest, reply *SearchResponse) error
 
 	results, err := s.Services.engine.Search.SearchAcrossProviders(ctx, providersToSearch, args.Query, options)
 	if err != nil {
-		return &Error{
-			Code:    ErrCodeSearchFailed,
-			Message: fmt.Sprintf("Search failed: %v", err),
-			Data:    map[string]interface{}{"query": args.Query, "error": err.Error()},
-		}
+		return SearchFailed(err, args.Query) // ← AUTOMATIC FUNCTION TRACKING!
 	}
 
+	// Process results (unchanged)
 	var allResults []SearchResultItem
 	for providerID, mangaList := range results {
 		prov, _ := s.Services.engine.GetProvider(providerID)
 		for _, manga := range mangaList {
 			item := SearchResultItem{
-				ID:           core.FormatMangaID(providerID, manga.ID),
-				Title:        manga.Title,
-				Provider:     providerID,
-				ProviderName: prov.Name(),
+				ID:    core.FormatMangaID(providerID, manga.ID),
+				Title: manga.Title, Provider: providerID, ProviderName: prov.Name(),
 			}
 			if args.IncludeAltTitles {
 				item.AltTitles = manga.AltTitles
 			}
-			item.Authors = manga.Authors // Assuming Authors and Tags are always desired if present
+			item.Authors = manga.Authors
 			item.Tags = manga.Tags
 			allResults = append(allResults, item)
 		}
 	}
 
-	*reply = SearchResponse{
-		Query:   args.Query,
-		Results: allResults,
-		Count:   len(allResults),
-	}
+	*reply = SearchResponse{Query: args.Query, Results: allResults, Count: len(allResults)}
 	return nil
 }
 
@@ -405,20 +389,12 @@ type DownloadResponse struct {
 func (s *DownloadService) Download(args *DownloadRequest, reply *DownloadResponse) error {
 	providerID, chapterIDPart, err := core.ParseMangaID(args.ChapterID)
 	if err != nil {
-		return &Error{
-			Code:    ErrCodeInvalidInput,
-			Message: fmt.Sprintf("Invalid chapter_id format: %v", err),
-			Data:    map[string]interface{}{"chapter_id": args.ChapterID},
-		}
+		return InvalidInput("chapter_id", args.ChapterID) // ← SIMPLE!
 	}
 
 	prov, exists := s.Services.engine.GetProvider(providerID)
 	if !exists {
-		return &Error{
-			Code:    ErrCodeProviderNotFound,
-			Message: fmt.Sprintf("Provider '%s' not found", providerID),
-			Data:    map[string]interface{}{"provider": providerID},
-		}
+		return ProviderNotFound(providerID) // ← SIMPLE!
 	}
 
 	outputDir := args.OutputDir
@@ -444,37 +420,22 @@ func (s *DownloadService) Download(args *DownloadRequest, reply *DownloadRespons
 	err = prov.DownloadChapter(downloadCtx, chapterIDPart, outputDir)
 	if err != nil {
 		*reply = DownloadResponse{
-			ChapterID:    chapterIDPart,
-			Provider:     providerID,
-			ProviderName: prov.Name(),
-			OutputDir:    outputDir,
-			Success:      false,
-			Message:      fmt.Sprintf("Failed to download chapter: %v", err),
+			ChapterID: chapterIDPart, Provider: providerID, ProviderName: prov.Name(),
+			OutputDir: outputDir, Success: false,
+			Message: fmt.Sprintf("Failed to download chapter: %v", err),
 		}
 
-		// Return structured error for better error handling
 		if errors.IsNotFound(err) {
-			return &Error{
-				Code:    ErrCodeResourceNotFound,
-				Message: fmt.Sprintf("Chapter '%s' not found on provider '%s'", chapterIDPart, prov.Name()),
-				Data:    map[string]interface{}{"chapter_id": chapterIDPart, "provider": providerID},
-			}
+			return ResourceNotFound("chapter", chapterIDPart)
 		}
 
-		return &Error{
-			Code:    ErrCodeDownloadFailed,
-			Message: fmt.Sprintf("Download failed: %v", err),
-			Data:    map[string]interface{}{"chapter_id": args.ChapterID, "error": err.Error()},
-		}
+		return DownloadFailed(err, args.ChapterID) // ← AUTOMATIC TRACKING!
 	}
 
 	*reply = DownloadResponse{
-		ChapterID:    chapterIDPart,
-		Provider:     providerID,
-		ProviderName: prov.Name(),
-		OutputDir:    outputDir,
-		Success:      true,
-		Message:      fmt.Sprintf("Successfully downloaded chapter %s to %s", args.ChapterID, outputDir),
+		ChapterID: chapterIDPart, Provider: providerID, ProviderName: prov.Name(),
+		OutputDir: outputDir, Success: true,
+		Message: fmt.Sprintf("Successfully downloaded chapter %s to %s", args.ChapterID, outputDir),
 	}
 	return nil
 }
@@ -679,31 +640,6 @@ func (s *ListService) List(args *ListRequest, reply *ListResponse) error {
 		s.Services.engine.Logger.Info("Listed %d mangas successfully", len(allMangas))
 	}
 	return nil
-}
-
-// --- Error Handling ---
-
-// RPC Error codes for structured error handling
-const (
-	ErrCodeInvalidInput     = -1001
-	ErrCodeProviderNotFound = -1002
-	ErrCodeResourceNotFound = -1003
-	ErrCodeSearchFailed     = -1004
-	ErrCodeFetchFailed      = -1005
-	ErrCodeDownloadFailed   = -1006
-	ErrCodeTimeout          = -1007
-	ErrCodeInvalidData      = -1008
-)
-
-// Error represents a structured RPC error
-type Error struct {
-	Code    int                    `json:"code"`
-	Message string                 `json:"message"`
-	Data    map[string]interface{} `json:"data,omitempty"`
-}
-
-func (e *Error) Error() string {
-	return fmt.Sprintf("RPC Error %d: %s", e.Code, e.Message)
 }
 
 // --- Timeout Calculation Helpers (similar to commands) ---

@@ -21,9 +21,9 @@ import (
 	"Luminary/pkg/engine/logger"
 	"Luminary/pkg/engine/network"
 	"Luminary/pkg/engine/parser"
+	"Luminary/pkg/errors"
 	"Luminary/pkg/provider"
 	"context"
-	"errors"
 	"fmt"
 	"sort"
 	"strings"
@@ -108,7 +108,7 @@ func (s *Service) ExecuteSearch(
 
 		// If we got no results at all, return the error
 		if len(resultsInterface) == 0 {
-			return nil, fmt.Errorf("search error: %w", err)
+			return nil, errors.T(err)
 		}
 
 		// Otherwise, log the error but continue with partial results
@@ -274,12 +274,13 @@ func (s *Service) SearchAcrossProviders(
 		for _, err := range collectedErrors {
 			s.Logger.Warn("- %v", err)
 		}
-		// Return partial results even with errors
+
+		// Return partial results with combined errors
+		return results, errors.Join(collectedErrors...)
 	} else {
 		s.Logger.Info("Search across providers completed successfully.")
 	}
 
-	// Always return results, even with errors
 	return results, nil
 }
 

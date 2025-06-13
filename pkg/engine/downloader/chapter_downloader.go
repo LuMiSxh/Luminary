@@ -19,6 +19,7 @@ package downloader
 import (
 	"Luminary/pkg/engine/core"
 	"Luminary/pkg/engine/logger"
+	"Luminary/pkg/errors"
 	"context"
 	"fmt"
 	"io"
@@ -196,7 +197,7 @@ func (d *DownloadService) DownloadChapter(ctx context.Context, config DownloadJo
 		if d.Logger != nil {
 			d.Logger.Error("Download errors (%d): %v", len(errs), errs[0])
 		}
-		return fmt.Errorf("download errors (%d): %v", len(errs), errs[0])
+		return errors.Join(errs...)
 	}
 
 	return nil

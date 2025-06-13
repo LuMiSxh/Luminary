@@ -1,6 +1,8 @@
 # Luminary JSON-RPC Mode Guide
 
-This guide covers how to use Luminary's JSON-RPC interface, provided by the `luminary-rpc` executable. This interface allows for robust, programmatic integration with other tools, scripts, or applications by communicating over standard input (stdin) and standard output (stdout) using the JSON-RPC 2.0 protocol.
+This guide covers how to use Luminary's JSON-RPC interface, provided by the `luminary-rpc` executable. This interface
+allows for robust, programmatic integration with other tools, scripts, or applications by communicating over standard
+input (stdin) and standard output (stdout) using the JSON-RPC 2.0 protocol.
 
 ![Separator](.github/assets/luminary-separator.png)
 
@@ -12,14 +14,21 @@ The JSON-RPC interface is accessed by running the `luminary-rpc` executable:
 ./luminary-rpc
 ```
 
-Once started, `luminary-rpc` listens for JSON-RPC 2.0 requests on its stdin and sends JSON-RPC 2.0 responses to its stdout. Each request and response must be a single line of JSON.
+Once started, `luminary-rpc` listens for JSON-RPC 2.0 requests on its stdin and sends JSON-RPC 2.0 responses to its
+stdout. Each request and response must be a single line of JSON.
 
 ### JSON-RPC 2.0 Request Format
 
 A typical request to `luminary-rpc` will look like this:
 
 ```json
-{"method": "ServiceName.MethodName", "params": [args_object], "id": request_id}
+{
+  "method": "ServiceName.MethodName",
+  "params": [
+    args_object
+  ],
+  "id": request_id
+}
 ```
 
 - `method`: A string containing the name of the service and method to be called (e.g., `"SearchService.Search"`).
@@ -31,7 +40,11 @@ A typical request to `luminary-rpc` will look like this:
 A successful response will look like this:
 
 ```json
-{"result": response_data, "error": null, "id": request_id}
+{
+  "result": response_data,
+  "error": null,
+  "id": request_id
+}
 ```
 
 - `result`: The data returned by the method call. The structure depends on the method.
@@ -41,13 +54,20 @@ A successful response will look like this:
 An error response will look like this:
 
 ```json
-{"result": null, "error": {"code": error_code, "message": "error_message"}, "id": request_id}
+{
+  "result": null,
+  "error": {
+    "code": error_code,
+    "message": "error_message"
+  },
+  "id": request_id
+}
 ```
 
 - `result`: `null` for error calls.
 - `error`: An object containing:
-  - `code`: An integer error code (standard JSON-RPC error codes or custom).
-  - `message`: A string describing the error.
+    - `code`: An integer error code (standard JSON-RPC error codes or custom).
+    - `message`: A string describing the error.
 - `id`: The `id` from the original request, or `null` if the request `id` could not be determined.
 
 ![Separator](.github/assets/luminary-separator.png)
@@ -66,11 +86,19 @@ Retrieves version information.
 An empty object `{}`.
 
 **Example Request:**
+
 ```json
-{"method": "VersionService.Get", "params": [{}], "id": 1}
+{
+  "method": "VersionService.Get",
+  "params": [
+    {}
+  ],
+  "id": 1
+}
 ```
 
 **Response Data (`response_data`):**
+
 ```json
 {
   "version": "0.0.0-dev",
@@ -80,7 +108,9 @@ An empty object `{}`.
   "log_file": "/Users/username/.luminary/logs/luminary.log"
 }
 ```
+
 **Fields:**
+
 - `version`: Luminary version string.
 - `go_version`: Go compiler version used to build.
 - `os`: Operating system (e.g., "linux", "windows", "darwin").
@@ -101,12 +131,20 @@ Retrieves a list of all configured manga providers.
 An empty object `{}`.
 
 **Example Request:**
+
 ```json
-{"method": "ProvidersService.List", "params": [{}], "id": 2}
+{
+  "method": "ProvidersService.List",
+  "params": [
+    {}
+  ],
+  "id": 2
+}
 ```
 
 **Response Data (`response_data`):**
 An array of provider information objects.
+
 ```json
 [
   {
@@ -121,7 +159,9 @@ An array of provider information objects.
   }
 ]
 ```
+
 **Fields (per provider object):**
+
 - `id`: Short unique identifier for the provider.
 - `name`: Human-readable name of the provider.
 - `description`: A brief description of the provider.
@@ -137,26 +177,52 @@ Searches for manga across one or all providers.
 Performs a manga search.
 
 **Request Parameters (`args_object`):**
+
 ```json
 {
   "query": "search term",
-  "provider": "optional_provider_id", // Optional: "mgd", "kmg", etc. If omitted, searches all.
-  "limit": 10,                       // Optional: Max results per page (default: 10)
-  "pages": 1,                        // Optional: Number of pages to fetch (default: 1)
-  "sort": "relevance",               // Optional: "relevance", "name", "newest", "updated"
-  "fields": ["title", "author"],     // Optional: Fields to search in
-  "filters": {"genre": "action"},    // Optional: Field-specific filters
-  "include_alt_titles": true,        // Optional: Include alternative titles (default: false)
-  "concurrency": 5                   // Optional: Max concurrent operations for this search (default: 5)
+  "provider": "optional_provider_id",
+  // Optional: "mgd", "kmg", etc. If omitted, searches all.
+  "limit": 10,
+  // Optional: Max results per page (default: 10)
+  "pages": 1,
+  // Optional: Number of pages to fetch (default: 1)
+  "sort": "relevance",
+  // Optional: "relevance", "name", "newest", "updated"
+  "fields": [
+    "title",
+    "author"
+  ],
+  // Optional: Fields to search in
+  "filters": {
+    "genre": "action"
+  },
+  // Optional: Field-specific filters
+  "include_alt_titles": true,
+  // Optional: Include alternative titles (default: false)
+  "concurrency": 5
+  // Optional: Max concurrent operations for this search (default: 5)
 }
 ```
 
 **Example Request:**
+
 ```json
-{"method": "SearchService.Search", "params": [{"query": "one piece", "provider": "mgd", "limit": 5}], "id": 3}
+{
+  "method": "SearchService.Search",
+  "params": [
+    {
+      "query": "one piece",
+      "provider": "mgd",
+      "limit": 5
+    }
+  ],
+  "id": 3
+}
 ```
 
 **Response Data (`response_data`):**
+
 ```json
 {
   "query": "one piece",
@@ -166,24 +232,37 @@ Performs a manga search.
       "title": "One Piece",
       "provider": "mgd",
       "provider_name": "MangaDex",
-      "alt_titles": ["ワンピース", "Wan Pīsu"],
-      "authors": ["Oda Eiichiro"],
-      "tags": ["Action", "Adventure", "Comedy", "Drama", "Shounen"]
+      "alt_titles": [
+        "ワンピース",
+        "Wan Pīsu"
+      ],
+      "authors": [
+        "Oda Eiichiro"
+      ],
+      "tags": [
+        "Action",
+        "Adventure",
+        "Comedy",
+        "Drama",
+        "Shounen"
+      ]
     }
   ],
   "count": 1
 }
 ```
+
 **Fields:**
+
 - `query`: The search query used.
 - `results`: An array of `SearchResultItem` objects.
-  - `id`: Combined provider ID and manga ID (e.g., "mgd:manga-id-123").
-  - `title`: Main title of the manga.
-  - `provider`: ID of the provider.
-  - `provider_name`: Display name of the provider.
-  - `alt_titles`: Array of alternative titles (optional).
-  - `authors`: Array of author names (optional).
-  - `tags`: Array of genre/tag strings (optional).
+    - `id`: Combined provider ID and manga ID (e.g., "mgd:manga-id-123").
+    - `title`: Main title of the manga.
+    - `provider`: ID of the provider.
+    - `provider_name`: Display name of the provider.
+    - `alt_titles`: Array of alternative titles (optional).
+    - `authors`: Array of author names (optional).
+    - `tags`: Array of genre/tag strings (optional).
 - `count`: Total number of results returned.
 
 ---
@@ -197,21 +276,36 @@ Lists manga from providers, typically without a specific search query.
 Retrieves a list of manga.
 
 **Request Parameters (`args_object`):**
+
 ```json
 {
-  "provider": "optional_provider_id", // Optional: If omitted, lists from all.
-  "limit": 50,                       // Optional: Max results (default: 50)
-  "pages": 1,                        // Optional: Number of pages (default: 1, 0 for all if supported by provider)
-  "concurrency": 5                   // Optional: Max concurrent operations (default: 5)
+  "provider": "optional_provider_id",
+  // Optional: If omitted, lists from all.
+  "limit": 50,
+  // Optional: Max results (default: 50)
+  "pages": 1,
+  // Optional: Number of pages (default: 1, 0 for all if supported by provider)
+  "concurrency": 5
+  // Optional: Max concurrent operations (default: 5)
 }
 ```
 
 **Example Request (All Providers):**
+
 ```json
-{"method": "ListService.List", "params": [{"limit": 2}], "id": 4}
+{
+  "method": "ListService.List",
+  "params": [
+    {
+      "limit": 2
+    }
+  ],
+  "id": 4
+}
 ```
 
 **Response Data (`response_data`):**
+
 ```json
 {
   "mangas": [
@@ -220,24 +314,36 @@ Retrieves a list of manga.
       "title": "Ironking",
       "provider": "mgd",
       "provider_name": "MangaDex",
-      "authors": ["Author A"],
-      "tags": ["Tag1"]
+      "authors": [
+        "Author A"
+      ],
+      "tags": [
+        "Tag1"
+      ]
     },
     {
       "id": "kmg:kissmanga/saving-the-world-through-a-game",
       "title": "Saving the World Through a Game",
       "provider": "kmg",
       "provider_name": "KissManga",
-      "authors": ["Author B"],
-      "tags": ["Tag2"]
+      "authors": [
+        "Author B"
+      ],
+      "tags": [
+        "Tag2"
+      ]
     }
   ],
   "count": 2,
-  "provider": "", // Empty if multiple providers
-  "provider_name": "Multiple Providers" // Or specific provider name if filtered
+  "provider": "",
+  // Empty if multiple providers
+  "provider_name": "Multiple Providers"
+  // Or specific provider name if filtered
 }
 ```
+
 **Fields:**
+
 - `mangas`: An array of `SearchResultItem` objects (same structure as in `SearchService.Search` results).
 - `count`: Total number of manga returned.
 - `provider`: Provider ID (empty if listing from all, or the specific provider ID if filtered).
@@ -254,25 +360,50 @@ Retrieves detailed information about a specific manga, with optional language fi
 Fetches details for a manga given its combined ID, with optional chapter language filtering.
 
 **Request Parameters (`args_object`):**
+
 ```json
 {
-  "manga_id": "provider_id:manga_specific_id", // e.g., "mgd:manga-id-123"
-  "language_filter": "en,ja",                  // Optional: Comma-separated language codes/names to filter chapters
-  "show_languages": true                       // Optional: Include available languages in response (default: false)
+  "manga_id": "provider_id:manga_specific_id",
+  // e.g., "mgd:manga-id-123"
+  "language_filter": "en,ja",
+  // Optional: Comma-separated language codes/names to filter chapters
+  "show_languages": true
+  // Optional: Include available languages in response (default: false)
 }
 ```
 
 **Example Request (Basic):**
+
 ```json
-{"method": "InfoService.Get", "params": [{"manga_id": "mgd:manga-id-123"}], "id": 5}
+{
+  "method": "InfoService.Get",
+  "params": [
+    {
+      "manga_id": "mgd:manga-id-123"
+    }
+  ],
+  "id": 5
+}
 ```
 
 **Example Request (With Language Filter):**
+
 ```json
-{"method": "InfoService.Get", "params": [{"manga_id": "mgd:manga-id-123", "language_filter": "en,ja", "show_languages": true}], "id": 5}
+{
+  "method": "InfoService.Get",
+  "params": [
+    {
+      "manga_id": "mgd:manga-id-123",
+      "language_filter": "en,ja",
+      "show_languages": true
+    }
+  ],
+  "id": 5
+}
 ```
 
 **Response Data (`response_data`):**
+
 ```json
 {
   "id": "mgd:manga-id-123",
@@ -280,16 +411,23 @@ Fetches details for a manga given its combined ID, with optional chapter languag
   "provider": "mgd",
   "provider_name": "MangaDex",
   "description": "Manga description...",
-  "authors": ["Author Name"],
+  "authors": [
+    "Author Name"
+  ],
   "status": "ongoing",
-  "tags": ["Action", "Adventure"],
+  "tags": [
+    "Action",
+    "Adventure"
+  ],
   "chapters": [
     {
       "id": "mgd:chapter-456",
       "title": "Chapter 1: Beginning",
       "number": 1.0,
-      "date": "2024-01-15T10:30:00Z", // ISO 8601 format, nullable (null if unavailable)
-      "language": "en" // ISO 639-1 language code, nullable (null if unavailable)
+      "date": "2024-01-15T10:30:00Z",
+      // ISO 8601 format, nullable (null if unavailable)
+      "language": "en"
+      // ISO 639-1 language code, nullable (null if unavailable)
     },
     {
       "id": "mgd:chapter-457",
@@ -300,14 +438,24 @@ Fetches details for a manga given its combined ID, with optional chapter languag
     }
   ],
   "chapter_count": 2,
-  "last_updated": "2024-04-10T12:00:00Z", // Nullable date in ISO 8601 format
-  "available_languages": ["en", "ja", "es", "fr"], // Optional: Only included if show_languages=true
-  "filtered_chapters": true,                       // Optional: Only included if language filtering was applied
-  "original_chapter_count": 15                     // Optional: Only included if chapters were filtered
+  "last_updated": "2024-04-10T12:00:00Z",
+  // Nullable date in ISO 8601 format
+  "available_languages": [
+    "en",
+    "ja",
+    "es",
+    "fr"
+  ],
+  // Optional: Only included if show_languages=true
+  "filtered_chapters": true,
+  // Optional: Only included if language filtering was applied
+  "original_chapter_count": 15
+  // Optional: Only included if chapters were filtered
 }
 ```
 
 **Fields:**
+
 - `id`: Combined provider ID and manga ID.
 - `title`: Manga title.
 - `provider`: Provider ID.
@@ -317,16 +465,18 @@ Fetches details for a manga given its combined ID, with optional chapter languag
 - `status`: Publication status (e.g., "ongoing", "completed").
 - `tags`: Array of genres/tags.
 - `chapters`: Array of `ChapterInfo` objects (filtered by language if `language_filter` was specified).
-  - `id`: Combined provider ID and chapter ID (e.g., "mgd:chapter-456").
-  - `title`: Chapter title.
-  - `number`: Chapter number (float, e.g., 1.0, 1.5).
-  - `date`: Publication date in ISO 8601 format (null if unavailable).
-  - `language`: Language code in ISO 639-1 format (e.g., "en", "ja", "fr") (null if unavailable).
+    - `id`: Combined provider ID and chapter ID (e.g., "mgd:chapter-456").
+    - `title`: Chapter title.
+    - `number`: Chapter number (float, e.g., 1.0, 1.5).
+    - `date`: Publication date in ISO 8601 format (null if unavailable).
+    - `language`: Language code in ISO 639-1 format (e.g., "en", "ja", "fr") (null if unavailable).
 - `chapter_count`: Total number of chapters returned (after filtering, if applied).
 - `last_updated`: When the manga was last updated (null if unavailable).
 - `available_languages`: Array of all available language codes for this manga (only included if `show_languages=true`).
-- `filtered_chapters`: Boolean indicating whether the chapters list was filtered by language (only included if filtering was applied).
-- `original_chapter_count`: Original number of chapters before language filtering (only included if filtering was applied).
+- `filtered_chapters`: Boolean indicating whether the chapters list was filtered by language (only included if filtering
+  was applied).
+- `original_chapter_count`: Original number of chapters before language filtering (only included if filtering was
+  applied).
 
 #### Language Filtering
 
@@ -339,24 +489,44 @@ The `language_filter` parameter accepts:
 - **Multiple languages**: Comma-separated list, e.g., `"en,ja"` or `"english,japanese"`
 
 **Language Filter Examples:**
+
 ```json
 // Filter by English only
-{"manga_id": "mgd:123", "language_filter": "en"}
+{
+  "manga_id": "mgd:123",
+  "language_filter": "en"
+}
 
 // Filter by English and Japanese
-{"manga_id": "mgd:123", "language_filter": "en,ja"}
+{
+  "manga_id": "mgd:123",
+  "language_filter": "en,ja"
+}
 
 // Filter by language names
-{"manga_id": "mgd:123", "language_filter": "english,japanese"}
+{
+  "manga_id": "mgd:123",
+  "language_filter": "english,japanese"
+}
 
 // Show available languages without filtering
-{"manga_id": "mgd:123", "show_languages": true}
+{
+  "manga_id": "mgd:123",
+  "show_languages": true
+}
 
 // Filter by English and show all available languages
-{"manga_id": "mgd:123", "language_filter": "en", "show_languages": true}
+{
+  "manga_id": "mgd:123",
+  "language_filter": "en",
+  "show_languages": true
+}
 
 // Include chapters with unknown language
-{"manga_id": "mgd:123", "language_filter": "en,unknown"}
+{
+  "manga_id": "mgd:123",
+  "language_filter": "en,unknown"
+}
 ```
 
 ---
@@ -370,24 +540,41 @@ Handles downloading of manga chapters.
 Initiates the download of a specific manga chapter.
 
 **Request Parameters (`args_object`):**
+
 ```json
 {
-  "chapter_id": "provider_id:chapter_specific_id", // e.g., "mgd:chapter-456"
-  "output_dir": "./downloads",                     // Optional: Default is "./downloads"
-  "volume": 1,                                     // Optional: Override volume number
-  "concurrency": 5                                 // Optional: Max concurrent page downloads (default: 5)
+  "chapter_id": "provider_id:chapter_specific_id",
+  // e.g., "mgd:chapter-456"
+  "output_dir": "./downloads",
+  // Optional: Default is "./downloads"
+  "volume": 1,
+  // Optional: Override volume number
+  "concurrency": 5
+  // Optional: Max concurrent page downloads (default: 5)
 }
 ```
 
 **Example Request:**
+
 ```json
-{"method": "DownloadService.Download", "params": [{"chapter_id": "mgd:chapter-456", "output_dir": "./my_manga"}], "id": 6}
+{
+  "method": "DownloadService.Download",
+  "params": [
+    {
+      "chapter_id": "mgd:chapter-456",
+      "output_dir": "./my_manga"
+    }
+  ],
+  "id": 6
+}
 ```
 
 **Response Data (`response_data`):**
+
 ```json
 {
-  "chapter_id": "chapter-456", // The chapter ID part (without provider prefix)
+  "chapter_id": "chapter-456",
+  // The chapter ID part (without provider prefix)
   "provider": "mgd",
   "provider_name": "MangaDex",
   "output_dir": "./my_manga",
@@ -395,7 +582,9 @@ Initiates the download of a specific manga chapter.
   "message": "Successfully downloaded chapter mgd:chapter-456 to ./my_manga"
 }
 ```
+
 **Fields:**
+
 - `chapter_id`: The original chapter ID part (without the provider prefix).
 - `provider`: Provider ID.
 - `provider_name`: Provider display name.
@@ -403,7 +592,9 @@ Initiates the download of a specific manga chapter.
 - `success`: Boolean indicating if the download was successful.
 - `message`: A status message (can include error details if `success` is `false`).
 
-**Note:** If the download fails, `success` will be `false`, and the `message` field will contain the error. The RPC call itself will still be a "successful" JSON-RPC response unless there's a fundamental issue with the request format or server. The business logic error is conveyed within the `result` payload.
+**Note:** If the download fails, `success` will be `false`, and the `message` field will contain the error. The RPC call
+itself will still be a "successful" JSON-RPC response unless there's a fundamental issue with the request format or
+server. The business logic error is conveyed within the `result` payload.
 
 ![Separator](.github/assets/luminary-separator.png)
 
@@ -414,6 +605,7 @@ Initiates the download of a specific manga chapter.
 Luminary supports the following language codes and names for filtering:
 
 **Common Language Codes (ISO 639-1):**
+
 - `en` - English
 - `ja` - Japanese
 - `es` - Spanish
@@ -461,6 +653,7 @@ Luminary supports the following language codes and names for filtering:
 - `uk` - Ukrainian
 
 **Extended Language Codes:**
+
 - `zh-cn` - Chinese (Simplified)
 - `zh-tw` - Chinese (Traditional)
 - `zh-hk` - Chinese (Hong Kong)
@@ -468,71 +661,404 @@ Luminary supports the following language codes and names for filtering:
 - `es-la` - Spanish (Latin America)
 
 **Special Values:**
+
 - `unknown` or `none` - Chapters with no specified language
 
 ### Language Filtering Examples
 
 **Filter by single language:**
+
 ```json
-{"method": "InfoService.Get", "params": [{"manga_id": "mgd:123", "language_filter": "en"}], "id": 1}
+{
+  "method": "InfoService.Get",
+  "params": [
+    {
+      "manga_id": "mgd:123",
+      "language_filter": "en"
+    }
+  ],
+  "id": 1
+}
 ```
 
 **Filter by multiple languages:**
+
 ```json
-{"method": "InfoService.Get", "params": [{"manga_id": "mgd:123", "language_filter": "en,ja,es"}], "id": 1}
+{
+  "method": "InfoService.Get",
+  "params": [
+    {
+      "manga_id": "mgd:123",
+      "language_filter": "en,ja,es"
+    }
+  ],
+  "id": 1
+}
 ```
 
 **Filter by language names:**
+
 ```json
-{"method": "InfoService.Get", "params": [{"manga_id": "mgd:123", "language_filter": "english,japanese"}], "id": 1}
+{
+  "method": "InfoService.Get",
+  "params": [
+    {
+      "manga_id": "mgd:123",
+      "language_filter": "english,japanese"
+    }
+  ],
+  "id": 1
+}
 ```
 
 **Include unknown language chapters:**
+
 ```json
-{"method": "InfoService.Get", "params": [{"manga_id": "mgd:123", "language_filter": "en,unknown"}], "id": 1}
+{
+  "method": "InfoService.Get",
+  "params": [
+    {
+      "manga_id": "mgd:123",
+      "language_filter": "en,unknown"
+    }
+  ],
+  "id": 1
+}
 ```
 
 **Show available languages:**
+
 ```json
-{"method": "InfoService.Get", "params": [{"manga_id": "mgd:123", "show_languages": true}], "id": 1}
+{
+  "method": "InfoService.Get",
+  "params": [
+    {
+      "manga_id": "mgd:123",
+      "show_languages": true
+    }
+  ],
+  "id": 1
+}
 ```
 
 ![Separator](.github/assets/luminary-separator.png)
 
 ## Error Handling
 
-If a JSON-RPC request is malformed, or if an unrecoverable server-side error occurs before a specific service method can process the business logic, a standard JSON-RPC error response is returned:
+Luminary's JSON-RPC interface provides comprehensive error information with automatic function call tracking and error
+classification.
 
-```json
-{"result": null, "error": {"code": -32600, "message": "Invalid Request"}, "id": "some_id"}
-{"result": null, "error": {"code": -32601, "message": "Method not found"}, "id": "some_id"}
-{"result": null, "error": {"code": -32602, "message": "Invalid params"}, "id": "some_id"}
-{"result": null, "error": {"code": -32700, "message": "Parse error"}, "id": null} 
-```
+### Standard JSON-RPC Errors
 
-For errors specific to a service method's execution (e.g., "provider not found", "manga not found"), the JSON-RPC call itself is successful (i.e., `error` field in the main JSON-RPC response is `null`), but the `result` payload will indicate the failure. For example, `DownloadService.Download` returns a `success: false` field in its result. Other services might return an error directly as the JSON-RPC error object if the method signature in Go returns an `error`.
+If a JSON-RPC request is malformed, or if an unrecoverable server-side error occurs before a specific service method can
+process the business logic, a standard JSON-RPC error response is returned:
 
-**Example of a business logic error returned as a JSON-RPC error:**
-If `SearchService.Search` is called with an invalid provider ID:
-```json
-{"result": null, "error": {"code": 1, "message": "provider 'invalid_provider' not found"}, "id": 7} 
-```
-*(Note: The specific error code for business logic errors might vary or be a generic one).*
-
-**Language filtering specific errors:**
-If no chapters match the language filter:
 ```json
 {
-  "result": {
-    "id": "mgd:123",
-    "title": "Manga Title",
-    "chapters": [],
-    "chapter_count": 0,
-    "available_languages": ["fr", "de", "es"],
-    "filtered_chapters": true,
-    "original_chapter_count": 25
+  "result": null,
+  "error": {
+    "code": -32600,
+    "message": "Invalid Request"
   },
-  "id": 8
+  "id": "some_id"
+}
+{
+  "result": null,
+  "error": {
+    "code": -32601,
+    "message": "Method not found"
+  },
+  "id": "some_id"
+}
+{
+  "result": null,
+  "error": {
+    "code": -32602,
+    "message": "Invalid params"
+  },
+  "id": "some_id"
+}
+{
+  "result": null,
+  "error": {
+    "code": -32700,
+    "message": "Parse error"
+  },
+  "id": null
+} 
+```
+
+### Enhanced Business Logic Errors
+
+For errors specific to service method execution, Luminary returns enhanced error objects with detailed context and
+automatic function call tracking:
+
+```json
+{
+  "result": null,
+  "error": {
+    "code": -2004,
+    "message": "Search failed for query 'one piece'",
+    "data": {
+      "query": "one piece",
+      "service": "SearchService",
+      "method": "Search"
+    },
+    "function_chain": "SearchService.Search() → ExecuteSearch() → MangadxProvider.Search() → HTTPService.DoRequest()",
+    "call_details": [
+      {
+        "function": "SearchService.Search",
+        "short_name": "SearchService.Search",
+        "operation": "search",
+        "timestamp": "2025-06-13T15:04:05.123Z",
+        "file": "services.go",
+        "line": 45
+      },
+      {
+        "function": "MangadxProvider.Search",
+        "short_name": "MangadxProvider.Search",
+        "operation": "search",
+        "timestamp": "2025-06-13T15:04:05.124Z",
+        "file": "mangadx.go",
+        "line": 89,
+        "context": {
+          "provider_id": "mangadx"
+        }
+      },
+      {
+        "function": "HTTPService.DoRequest",
+        "short_name": "HTTPService.DoRequest",
+        "operation": "http_request",
+        "timestamp": "2025-06-13T15:04:05.125Z",
+        "file": "client.go",
+        "line": 156,
+        "context": {
+          "url": "https://api.mangadx.org/manga",
+          "http_method": "GET",
+          "status_code": 0
+        }
+      }
+    ],
+    "error_category": "network",
+    "original_error": "dial tcp: no such host",
+    "root_cause": "no such host",
+    "timestamp": "2025-06-13T15:04:05.123Z",
+    "service": "SearchService",
+    "method": "Search"
+  },
+  "id": 7
+}
+```
+
+### Enhanced Error Fields
+
+**Core Fields:**
+
+- `code`: Integer error code (see Error Codes section below)
+- `message`: Human-readable error message
+- `data`: Request context and additional data
+
+**Function Tracking Fields:**
+
+- `function_chain`: Human-readable function call path (e.g., "A() → B() → C()")
+- `call_details`: Array of detailed function call information
+    - `function`: Full function name with package path
+    - `short_name`: Simplified function name (e.g., "ServiceName.Method")
+    - `operation`: Operation being performed (search, download, http_request, etc.)
+    - `timestamp`: When this function processed the error (ISO 8601)
+    - `file`: Source file name where error was handled
+    - `line`: Line number in source file
+    - `context`: Function-specific context data
+
+**Error Classification Fields:**
+
+- `error_category`: Error type classification (see Categories section below)
+- `original_error`: The original error message that started the chain
+- `root_cause`: The deepest underlying error cause
+- `timestamp`: When the error occurred
+- `service`: RPC service name
+- `method`: RPC method name
+
+### Error Codes
+
+Luminary uses structured error codes organized by category:
+
+#### Input/Validation Errors (1000-1099)
+
+- `-1001` - Invalid input data
+- `-1002` - Invalid data format
+- `-1003` - Validation failed
+
+#### Resource/Provider Errors (1100-1199)
+
+- `-1101` - Provider not found
+- `-1102` - Resource (manga/chapter) not found
+- `-1103` - Provider error
+
+#### Operation Errors (1200-1299)
+
+- `-1201` - Search failed
+- `-1202` - Fetch failed
+- `-1203` - Download failed
+- `-1204` - List failed
+
+#### Network Errors (2000-2099)
+
+- `-2001` - Network unavailable
+- `-2002` - Network timeout
+- `-2003` - Connection failed
+- `-2004` - DNS failure
+- `-2005` - HTTP error
+
+#### Timeout Errors (2100-2199)
+
+- `-2101` - Operation timeout
+- `-2102` - Deadline exceeded
+- `-2103` - Context canceled
+
+#### Authentication/Authorization (2200-2299)
+
+- `-2201` - Authentication failed
+- `-2202` - Rate limited
+- `-2203` - Forbidden
+- `-2204` - Unauthorized
+
+#### Parsing/Data Errors (3000-3099)
+
+- `-3001` - Parsing failed
+- `-3002` - Invalid format
+- `-3003` - Data corrupted
+- `-3004` - JSON error
+- `-3005` - XML error
+
+#### File System Errors (3100-3199)
+
+- `-3101` - File not found
+- `-3102` - Permission denied
+- `-3103` - File system error
+- `-3104` - Insufficient disk space
+
+#### Download Errors (3200-3299)
+
+- `-3201` - Download interrupted
+- `-3202` - Download timeout
+- `-3203` - Download corrupted
+- `-3204` - Download failed
+
+#### System Errors (9000-9099)
+
+- `-9001` - Panic occurred
+- `-9002` - Internal error
+- `-9099` - Unknown error
+
+### Error Categories
+
+Errors are automatically classified into categories for easier handling:
+
+- `network` - Network connectivity issues, DNS failures, connection problems
+- `provider` - Provider-specific issues, site unavailable
+- `parsing` - JSON/XML parsing errors, invalid response format
+- `validation` - Input validation failures
+- `timeout` - Operation timeouts, deadlines exceeded
+- `authentication` - Auth failures, rate limiting
+- `rate_limit` - Too many requests
+- `not_found` - Resource not found
+- `filesystem` - File system errors, permissions
+- `download` - Download-specific errors
+- `panic` - System panics
+- `unknown` - Unclassified errors
+
+### Error Examples
+
+#### Network Connectivity Error
+
+When there's no internet connection during a search:
+
+```json
+{
+  "result": null,
+  "error": {
+    "code": -2004,
+    "message": "Search failed for query 'one piece'",
+    "function_chain": "SearchService.Search() → MangadxProvider.Search() → HTTPService.DoRequest()",
+    "error_category": "network",
+    "original_error": "dial tcp: no such host",
+    "call_details": [
+      {
+        "function": "HTTPService.DoRequest",
+        "operation": "http_request",
+        "context": {
+          "url": "https://api.mangadx.org/manga",
+          "http_method": "GET"
+        }
+      }
+    ]
+  },
+  "id": 1
+}
+```
+
+#### Provider Not Found Error
+
+```json
+{
+  "result": null,
+  "error": {
+    "code": -1101,
+    "message": "Provider 'invalid_provider' not found",
+    "function_chain": "SearchService.Search() → GetProvider()",
+    "error_category": "not_found",
+    "data": {
+      "provider_id": "invalid_provider"
+    }
+  },
+  "id": 2
+}
+```
+
+#### Download Permission Error
+
+```json
+{
+  "result": null,
+  "error": {
+    "code": -3102,
+    "message": "Failed to download chapter 'chapter-123'",
+    "function_chain": "DownloadService.Download() → DownloadFile() → os.Create()",
+    "error_category": "filesystem",
+    "original_error": "permission denied",
+    "data": {
+      "chapter_id": "chapter-123",
+      "destination": "/protected/downloads/"
+    }
+  },
+  "id": 3
+}
+```
+
+#### JSON Parsing Error
+
+```json
+{
+  "result": null,
+  "error": {
+    "code": -3004,
+    "message": "Search failed for query 'manga'",
+    "function_chain": "SearchService.Search() → MangadxProvider.Search() → json.Unmarshal()",
+    "error_category": "parsing",
+    "original_error": "invalid character '<' looking for beginning of value",
+    "call_details": [
+      {
+        "function": "json.Unmarshal",
+        "operation": "parsing",
+        "context": {
+          "data_type": "json",
+          "data_size": 1024
+        }
+      }
+    ]
+  },
+  "id": 4
 }
 ```
 
@@ -552,6 +1078,8 @@ If no chapters match the language filter:
 - Language filtering is case-insensitive and supports both codes and full language names.
 - When using language filtering, the `chapters` array will only contain chapters matching the specified languages.
 - The `available_languages` field is only included when `show_languages=true` is specified in the request.
-- Language filtering can significantly reduce the number of chapters returned, which is useful for manga with many translations.
+- Language filtering can significantly reduce the number of chapters returned, which is useful for manga with many
+  translations.
 
-This RPC interface provides a more structured and robust way to integrate Luminary's functionalities compared to parsing CLI output.
+This RPC interface provides a more structured and robust way to integrate Luminary's functionalities compared to parsing
+CLI output.

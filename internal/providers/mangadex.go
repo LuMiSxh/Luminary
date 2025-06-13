@@ -6,6 +6,7 @@ import (
 	"Luminary/pkg/engine/network"
 	"Luminary/pkg/engine/parser"
 	"Luminary/pkg/engine/search"
+	"Luminary/pkg/errors"
 	"Luminary/pkg/provider"
 	"Luminary/pkg/provider/api"
 	"Luminary/pkg/provider/common"
@@ -334,7 +335,7 @@ func processChapters(state *MangaDexState) api.ProcessChaptersFunc {
 		// Cast to the expected response type
 		chaptersResp, ok := response.(*MgdChapterListResp)
 		if !ok {
-			return nil, false, fmt.Errorf("unexpected response type for chapters: %T", response)
+			return nil, false, errors.TP(fmt.Errorf("unexpected response type for chapters: %T", response), "mgd")
 		}
 
 		// If we didn't get any data, return empty with no more pages
@@ -405,7 +406,7 @@ func createChapterProcessor(e *engine.Engine, state *MangaDexState) api.Response
 		// Cast to expected response type
 		chapterResp, ok := response.(*MgdChapterResp)
 		if !ok {
-			return nil, fmt.Errorf("unexpected response type: %T", response)
+			return nil, errors.TP(fmt.Errorf("unexpected response type: %T", response), "mgd")
 		}
 
 		// Create a new chapter object
@@ -469,13 +470,13 @@ func createChapterProcessor(e *engine.Engine, state *MangaDexState) api.Response
 			chapterID,
 		)
 		if err != nil {
-			return nil, fmt.Errorf("failed to fetch chapter pages: %w", err)
+			return nil, errors.TP(err, "mgd")
 		}
 
 		// Extract pages from the response
 		pagesResp, ok := pagesResponse.(*MgdPagesResp)
 		if !ok {
-			return nil, fmt.Errorf("unexpected response type for pages: %T", pagesResponse)
+			return nil, errors.TP(fmt.Errorf("unexpected response type: %T", pagesResponse), "mgd")
 		}
 
 		// Build pages
