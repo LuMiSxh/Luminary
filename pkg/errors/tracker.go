@@ -212,14 +212,15 @@ func Track(err error, context ...map[string]interface{}) error {
 		functionCall.Context = context[0]
 	}
 
-	// If already a TrackedError, add to chain
+	// If already a TrackedError, add to chain but preserve the original category
 	var trackedErr *TrackedError
 	if errors.As(err, &trackedErr) {
+		// Only append to call chain without re-classifying the error
 		trackedErr.CallChain = append(trackedErr.CallChain, functionCall)
 		return trackedErr
 	}
 
-	// Create new TrackedError
+	// Create new TrackedError - only classify if it's a new tracked error
 	category := classifyError(err)
 	stackTrace := captureStackTrace()
 
@@ -294,11 +295,19 @@ func TrackWithContext(err error, contextData map[string]interface{}) error {
 
 // TrackNetwork marks an error as network-related
 func TrackNetwork(err error, context ...map[string]interface{}) error {
+	// First track the error normally to add function call info
 	trackedErr := Track(err, context...)
+
+	// If it's not already a network error, update the category
 	var te *TrackedError
 	if errors.As(trackedErr, &te) {
-		te.Category = CategoryNetwork
+		// Only override category if not already categorized as network
+		// or if it's unknown (default)
+		if te.Category == CategoryUnknown {
+			te.Category = CategoryNetwork
+		}
 	}
+
 	return trackedErr
 }
 
@@ -311,11 +320,18 @@ func TrackProvider(err error, providerID string, context ...map[string]interface
 		}
 	}
 
+	// First track the error normally to add function call info
 	trackedErr := Track(err, ctx)
+
+	// If it's not already categorized, mark as provider error
 	var te *TrackedError
 	if errors.As(trackedErr, &te) {
-		te.Category = CategoryProvider
+		// Only override category if unknown (default)
+		if te.Category == CategoryUnknown {
+			te.Category = CategoryProvider
+		}
 	}
+
 	return trackedErr
 }
 
