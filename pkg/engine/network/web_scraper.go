@@ -20,6 +20,7 @@ import (
 	"Luminary/pkg/engine/core"
 	"Luminary/pkg/engine/logger"
 	"Luminary/pkg/engine/parser"
+	"Luminary/pkg/errors"
 	"Luminary/pkg/util"
 	"context"
 	"fmt"
@@ -244,7 +245,7 @@ func (s *WebScraperService) FetchPage(ctx context.Context, req *ScraperRequest) 
 	// Create HTTP request
 	httpReq, err := http.NewRequestWithContext(ctx, req.Method, req.URL, nil)
 	if err != nil {
-		return nil, fmt.Errorf("failed to create request: %w", err)
+		return nil, errors.TN(err)
 	}
 
 	// Add headers
@@ -300,9 +301,11 @@ func (s *WebScraperService) FetchPage(ctx context.Context, req *ScraperRequest) 
 	// Make the request
 	s.Logger.Debug("Fetching URL: %s", req.URL)
 	resp, err := client.Do(httpReq)
+
 	if err != nil {
-		return nil, fmt.Errorf("failed to fetch page: %w", err)
+		return nil, errors.T(err)
 	}
+
 	defer func(Body io.ReadCloser) {
 		err := Body.Close()
 		if err != nil {
@@ -313,22 +316,22 @@ func (s *WebScraperService) FetchPage(ctx context.Context, req *ScraperRequest) 
 	// Check status code
 	if resp.StatusCode != http.StatusOK {
 		if resp.StatusCode == http.StatusNotFound {
-			return nil, fmt.Errorf("page not found (404): %s", req.URL)
+			return nil, errors.TN(errors.ErrNotFound)
 		}
 
-		return nil, fmt.Errorf("unexpected status code: %d", resp.StatusCode)
+		return nil, errors.TM(errors.ErrServerError, fmt.Sprintf("%s %s", resp.Status, req.URL))
 	}
 
 	// Read response body
 	body, err := io.ReadAll(resp.Body)
 	if err != nil {
-		return nil, fmt.Errorf("failed to read response body: %w", err)
+		return nil, errors.T(err)
 	}
 
 	// Parse HTML
 	rootElement, err := s.DOM.ParseHTML(string(body))
 	if err != nil {
-		return nil, fmt.Errorf("failed to parse HTML: %w", err)
+		return nil, errors.T(err)
 	}
 
 	// Create response headers map
@@ -416,13 +419,13 @@ func (m *MadaraScraper) FetchMangaList(ctx context.Context, pageNum int, limit i
 	// Fetch page
 	webPage, err := m.WebScraper.FetchPage(ctx, req)
 	if err != nil {
-		return nil, fmt.Errorf("failed to fetch manga list: %w", err)
+		return nil, errors.T(err)
 	}
 
 	// Find manga elements
 	mangaElements, err := webPage.Find(m.QueryMangas)
 	if err != nil {
-		return nil, fmt.Errorf("failed to find manga elements: %w", err)
+		return nil, errors.T(err)
 	}
 
 	// Extract manga data
@@ -459,7 +462,7 @@ func (m *MadaraScraper) FetchMangaChapters(ctx context.Context, mangaID string) 
 	// Fetch manga page
 	webPage, err := m.WebScraper.FetchPage(ctx, req)
 	if err != nil {
-		return nil, fmt.Errorf("failed to fetch manga page: %w", err)
+		return nil, errors.T(err)
 	}
 
 	// Try to find the chapters placeholder for AJAX loading
@@ -484,7 +487,7 @@ func (m *MadaraScraper) FetchMangaChapters(ctx context.Context, mangaID string) 
 	// Direct scraping from the page
 	chapterElements, err := webPage.Find(m.QueryChapters)
 	if err != nil {
-		return nil, fmt.Errorf("failed to find chapter elements: %w", err)
+		return nil, errors.TM(err, "failed to find chapter elements")
 	}
 
 	// Extract chapter data
@@ -562,7 +565,7 @@ func (m *MadaraScraper) fetchChaptersViaAjax(ctx context.Context, mangaID, dataI
 
 	oldPage, err := m.WebScraper.FetchPage(ctx, oldReq)
 	if err != nil {
-		return nil, fmt.Errorf("both AJAX methods failed: %w", err)
+		return nil, errors.TM(err, "both AJAX methods failed")
 	}
 
 	return m.extractChaptersFromPage(oldPage)
@@ -572,7 +575,7 @@ func (m *MadaraScraper) fetchChaptersViaAjax(ctx context.Context, mangaID, dataI
 func (m *MadaraScraper) extractChaptersFromPage(page *WebPage) ([]core.ChapterInfo, error) {
 	chapterElements, err := page.Find(m.QueryChapters)
 	if err != nil {
-		return nil, fmt.Errorf("failed to find chapter elements: %w", err)
+		return nil, errors.TM(err, "failed to find chapter elements")
 	}
 
 	var chapters []core.ChapterInfo
@@ -648,17 +651,17 @@ func (m *MadaraScraper) FetchChapterPages(ctx context.Context, chapterID string)
 			webPage, err = m.WebScraper.FetchPage(ctx, req)
 
 			if err != nil {
-				return nil, fmt.Errorf("failed to fetch chapter page: %w", err)
+				return nil, errors.T(err)
 			}
 		} else {
-			return nil, fmt.Errorf("failed to fetch chapter page: %w", err)
+			return nil, errors.T(err)
 		}
 	}
 
 	// Find page elements
 	pageElements, err := webPage.Find(m.QueryPages)
 	if err != nil {
-		return nil, fmt.Errorf("failed to find page elements: %w", err)
+		return nil, errors.TM(err, "failed to find page elements")
 	}
 
 	// Extract page data
@@ -742,7 +745,7 @@ func ExtractPathFromURL(fullURL string) string {
 func extractHost(urlStr string) (string, error) {
 	u, err := url.Parse(urlStr)
 	if err != nil {
-		return "", err
+		return "", errors.T(err)
 	}
 
 	return u.Host, nil

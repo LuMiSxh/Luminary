@@ -24,6 +24,7 @@ import (
 	"Luminary/pkg/util"
 	"context"
 	"fmt"
+	"os"
 	"time"
 
 	"github.com/spf13/cobra"
@@ -48,10 +49,9 @@ var infoCmd = &cobra.Command{
 
 		prov, exists := appEngine.GetProvider(providerID)
 		if !exists {
-			fmt.Printf("Error: Provider '%s' not found\n", providerID)
-			fmt.Println("Available providers:")
-			for _, p := range appEngine.AllProvider() {
-				fmt.Printf("  - %s (%s)\n", p.ID(), p.Name())
+			providerErr := fmt.Errorf("provider '%s' not found", providerID)
+			if _, err := fmt.Fprintf(os.Stderr, "%s\n", errors.FormatCLI(errors.T(providerErr))); err != nil {
+				return
 			}
 			return
 		}
@@ -62,12 +62,17 @@ var infoCmd = &cobra.Command{
 
 		manga, err := prov.GetManga(ctx, mangaID)
 		if err != nil {
-			handleMangaError(err, providerID, mangaID, prov.Name())
+			if _, err := fmt.Fprintln(os.Stderr, errors.FormatCLI(err)); err != nil {
+				return
+			}
 			return
 		}
 
 		if manga == nil || manga.Title == "" {
-			fmt.Println("Error: Retrieved empty or invalid manga data")
+			providerErr := fmt.Errorf("manga '%s' not found on provider '%s'", mangaID, prov.Name())
+			if _, err := fmt.Fprintf(os.Stderr, "%s\n", errors.FormatCLI(errors.T(providerErr))); err != nil {
+				return
+			}
 			return
 		}
 		if manga.Chapters == nil {
@@ -102,7 +107,7 @@ var infoCmd = &cobra.Command{
 
 		// Show available languages if requested
 		if infoShowLanguages {
-			// Need to get original chapters for language list if filtering was applied
+			// Need to get original chapters for a language list if filtering was applied
 			if infoLanguageFilter != "" {
 				// Re-fetch to get all chapters for language display
 				originalManga, err := prov.GetManga(ctx, mangaID)
@@ -125,31 +130,6 @@ var infoCmd = &cobra.Command{
 
 		fmt.Print(display.MangaInfo(manga, prov, displayOptions))
 	},
-}
-
-// handleMangaError provides user-friendly error messages based on error type
-func handleMangaError(err error, providerID, mangaID, providerName string) {
-	// Check for specific error types in order of specificity
-	if errors.IsNotFound(err) {
-		// Not found error
-		fmt.Printf("Error: Manga '%s' not found on %s\n", mangaID, providerName)
-		return
-	}
-
-	// Check for server errors
-	if errors.IsServerError(err) {
-		fmt.Printf("Error: Server error from %s. Please try again later.\n", providerName)
-		return
-	}
-
-	// Check for rate limiting
-	if errors.Is(err, errors.ErrRateLimit) {
-		fmt.Printf("Error: Rate limit exceeded for %s. Please try again later.\n", providerName)
-		return
-	}
-
-	// Generic error handling
-	fmt.Printf("Error retrieving manga: %v\n", err)
 }
 
 func init() {

@@ -74,11 +74,7 @@ func (a *APIService) FetchFromAPI(
 ) (interface{}, error) {
 	endpoint, exists := config.Endpoints[endpointName]
 	if !exists {
-		return nil, &errors.APIError{
-			Endpoint: endpointName,
-			Message:  "Endpoint not found",
-			Err:      errors.ErrInvalidInput,
-		}
+		return nil, errors.TN(fmt.Errorf("endpoint %s does not exist", endpointName))
 	}
 
 	// Format the path with provided parameters
@@ -145,51 +141,7 @@ func (a *APIService) FetchFromAPI(
 	// Make the HTTP request and handle errors
 	err := a.HTTP.FetchJSON(ctx, fullURL, responseData, headers)
 	if err != nil {
-		// Check for specific error types and enhance them with API context
-		if errors.IsNotFound(err) {
-			// Extract resource details
-			resourceType := ""
-			resourceID := ""
-
-			// Try to determine from the URL path
-			pathParts := strings.Split(strings.Trim(path, "/"), "/")
-			if len(pathParts) > 0 {
-				resourceType = pathParts[0]
-
-				// Try to get the resource ID
-				if len(pathParams) > 0 {
-					resourceID = pathParams[0]
-				}
-			}
-
-			return nil, &errors.ResourceNotFoundError{
-				APIError: errors.APIError{
-					Endpoint: endpointName,
-					URL:      fullURL,
-					Message:  fmt.Sprintf("%s not found", resourceType),
-					Err:      err,
-				},
-				ResourceType: resourceType,
-				ResourceID:   resourceID,
-			}
-		}
-
-		// For other errors, wrap them with API context
-		var apiErr = &errors.APIError{
-			Endpoint: endpointName,
-			URL:      fullURL,
-			Message:  "API request failed",
-			Err:      err,
-		}
-
-		// Try to extract status code if it's an HTTP error
-		var httpErr *errors.HTTPError
-		if errors.As(err, &httpErr) {
-			apiErr.StatusCode = httpErr.StatusCode
-			apiErr.Message = httpErr.Message
-		}
-
-		return nil, apiErr
+		return nil, errors.TN(err)
 	}
 
 	a.Logger.Debug("[API] Request successful: %s", fullURL)

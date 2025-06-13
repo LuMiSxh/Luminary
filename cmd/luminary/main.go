@@ -53,6 +53,9 @@ func main() {
 	// Set the version for the root command
 	commands.SetupVersion(Version)
 
+	// Enable debug mode if needed
+	commands.SetupDebugMode()
+
 	// Execute the root command
 	commands.Execute()
 }

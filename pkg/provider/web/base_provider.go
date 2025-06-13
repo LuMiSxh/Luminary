@@ -20,6 +20,7 @@ import (
 	"Luminary/pkg/engine"
 	"Luminary/pkg/engine/core"
 	"Luminary/pkg/engine/network"
+	"Luminary/pkg/errors"
 	"Luminary/pkg/provider/common"
 	"context"
 	"fmt"
@@ -110,21 +111,21 @@ func (p *Provider) FetchPage(ctx context.Context, url string) (*network.WebPage,
 // Should be overridden by specific provider types
 func (p *Provider) Search(ctx context.Context, query string, options core.SearchOptions) ([]core.Manga, error) {
 	p.engine.Logger.Info("[%s] Searching for: %s", p.ID(), query)
-	return nil, fmt.Errorf("search not implemented for HTML provider %s", p.ID())
+	return nil, errors.TP(fmt.Errorf("search not implemented for HTML provider %s", p.ID()), p.ID())
 }
 
 // GetManga retrieves manga details
 // Should be overridden by specific provider types
 func (p *Provider) GetManga(ctx context.Context, id string) (*core.MangaInfo, error) {
 	p.engine.Logger.Info("[%s] Getting manga details for: %s", p.ID(), id)
-	return nil, fmt.Errorf("GetManga not implemented for HTML provider %s", p.ID())
+	return nil, errors.TP(fmt.Errorf("GetManga not implemented for HTML provider %s", p.ID()), p.ID())
 }
 
 // GetChapter retrieves chapter details
 // Should be overridden by specific provider types
 func (p *Provider) GetChapter(ctx context.Context, chapterID string) (*core.Chapter, error) {
 	p.engine.Logger.Info("[%s] Getting chapter details for: %s", p.ID(), chapterID)
-	return nil, fmt.Errorf("GetChapter not implemented for HTML provider %s", p.ID())
+	return nil, errors.TP(fmt.Errorf("GetChapter not implemented for HTML provider %s", p.ID()), p.ID())
 }
 
 // TryGetMangaForChapter attempts to get manga info for a chapter
@@ -133,7 +134,7 @@ func (p *Provider) TryGetMangaForChapter(ctx context.Context, chapterID string) 
 	// Get the chapter to extract manga ID
 	chapter, err := p.GetChapter(ctx, chapterID)
 	if err != nil {
-		return nil, err
+		return nil, errors.TP(err, p.ID())
 	}
 
 	// If manga ID is available in chapter
@@ -141,12 +142,12 @@ func (p *Provider) TryGetMangaForChapter(ctx context.Context, chapterID string) 
 		// Get manga details
 		mangaInfo, err := p.GetManga(ctx, chapter.MangaID)
 		if err != nil {
-			return nil, err
+			return nil, errors.TP(err, p.ID())
 		}
 		return &mangaInfo.Manga, nil
 	}
 
-	return nil, fmt.Errorf("couldn't determine manga for chapter %s", chapterID)
+	return nil, errors.TP(fmt.Errorf("couldn't determine manga for chapter %s", chapterID), p.ID())
 }
 
 // DownloadChapter downloads a chapter

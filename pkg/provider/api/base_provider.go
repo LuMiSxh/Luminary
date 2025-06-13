@@ -158,7 +158,7 @@ func (p *Provider) Initialize(ctx context.Context) error {
 func (p *Provider) Search(ctx context.Context, query string, options core.SearchOptions) ([]core.Manga, error) {
 	extractorSet, ok := p.config.ExtractorSets["search"]
 	if !ok {
-		return nil, fmt.Errorf("search extractor not configured for %s", p.Name())
+		return nil, errors.TP(fmt.Errorf("search extractor not configured"), p.ID())
 	}
 
 	// Use provided pagination config or default
@@ -191,7 +191,7 @@ func (p *Provider) Search(ctx context.Context, query string, options core.Search
 func (p *Provider) GetManga(ctx context.Context, id string) (*core.MangaInfo, error) {
 	extractorSet, ok := p.config.ExtractorSets["manga"]
 	if !ok {
-		return nil, fmt.Errorf("manga extractor not configured for %s", p.Name())
+		return nil, errors.TP(fmt.Errorf("manga extractor not configured"), p.ID())
 	}
 
 	return common.ExecuteGetManga(
@@ -280,23 +280,13 @@ func (p *Provider) fetchChaptersWithCustomProcessor(ctx context.Context, mangaID
 		)
 
 		if err != nil {
-			// Handle not found errors specially
-			if errors.IsNotFound(err) {
-				// If this is the first page, report the error
-				if page == 0 {
-					return nil, fmt.Errorf("no chapters found for manga %s", mangaID)
-				}
-				// Otherwise, we've just reached the end
-				break
-			}
-
-			return nil, fmt.Errorf("failed to fetch chapters (page %d): %w", page+1, err)
+			return nil, errors.T(err)
 		}
 
 		// Process this page of chapters using the custom processor
 		chapterInfoList, morePages, err := p.config.ChapterConfig.ProcessChapters(ctx, p, response, mangaID)
 		if err != nil {
-			return nil, fmt.Errorf("failed to process chapters: %w", err)
+			return nil, errors.T(err)
 		}
 
 		// Add to the overall list
@@ -360,17 +350,7 @@ func (p *Provider) fetchChaptersWithPagination(ctx context.Context, mangaID stri
 		)
 
 		if err != nil {
-			// Handle not found errors specially
-			if errors.IsNotFound(err) {
-				// If this is the first page, report the error
-				if page == 0 {
-					return nil, fmt.Errorf("no chapters found for manga %s", mangaID)
-				}
-				// Otherwise, we've just reached the end
-				break
-			}
-
-			return nil, fmt.Errorf("failed to fetch chapters (page %d): %w", page+1, err)
+			return nil, errors.T(err)
 		}
 
 		// Extract items from the response
@@ -381,7 +361,7 @@ func (p *Provider) fetchChaptersWithPagination(ctx context.Context, mangaID stri
 
 		items, err := getValueFromPath(response, itemsPath)
 		if err != nil {
-			return nil, fmt.Errorf("failed to extract chapters from response: %w", err)
+			return nil, errors.T(err)
 		}
 
 		// Convert to a slice
@@ -450,7 +430,7 @@ func (p *Provider) fetchChaptersWithPagination(ctx context.Context, mangaID stri
 func (p *Provider) GetChapter(ctx context.Context, chapterID string) (*core.Chapter, error) {
 	extractorSet, ok := p.config.ExtractorSets["chapter"]
 	if !ok {
-		return nil, fmt.Errorf("chapter extractor not configured for %s", p.Name())
+		return nil, errors.TP(fmt.Errorf("chapter extractor not configured"), p.ID())
 	}
 
 	// Get the response processor if configured
@@ -460,7 +440,7 @@ func (p *Provider) GetChapter(ctx context.Context, chapterID string) (*core.Chap
 		processorFn = func(response interface{}, id string) (*core.Chapter, error) {
 			processed, err := rawFn(response, id)
 			if err != nil {
-				return nil, err
+				return nil, errors.T(err)
 			}
 
 			// Check if the processed result is already the correct type
@@ -470,7 +450,7 @@ func (p *Provider) GetChapter(ctx context.Context, chapterID string) (*core.Chap
 
 			// Otherwise, log a warning and return nil
 			p.engine.Logger.Warn("Response processor did not return *engine.Chapter")
-			return nil, fmt.Errorf("invalid processor return type")
+			return nil, errors.TP(fmt.Errorf("invalid processor return type"), p.ID())
 		}
 	}
 
@@ -489,7 +469,7 @@ func (p *Provider) TryGetMangaForChapter(ctx context.Context, chapterID string) 
 	// Fetch chapter details first to get manga ID
 	chapter, err := p.GetChapter(ctx, chapterID)
 	if err != nil {
-		return nil, err
+		return nil, errors.T(err)
 	}
 
 	// If manga ID is available in chapter
@@ -497,7 +477,7 @@ func (p *Provider) TryGetMangaForChapter(ctx context.Context, chapterID string) 
 		// Get manga details
 		mangaInfo, err := p.GetManga(ctx, chapter.MangaID)
 		if err != nil {
-			return nil, err
+			return nil, errors.T(err)
 		}
 		return &mangaInfo.Manga, nil
 	}
@@ -567,7 +547,7 @@ func getValueFromPath(data interface{}, path []string) (interface{}, error) {
 	}
 
 	if data == nil {
-		return nil, fmt.Errorf("data is nil")
+		return nil, errors.T(fmt.Errorf("data is nil"))
 	}
 
 	current := path[0]
@@ -577,7 +557,7 @@ func getValueFromPath(data interface{}, path []string) (interface{}, error) {
 	if dataMap, ok := data.(map[string]interface{}); ok {
 		value, exists := dataMap[current]
 		if !exists {
-			return nil, fmt.Errorf("key '%s' not found in map", current)
+			return nil, errors.T(fmt.Errorf("key '%s' not found in map", current))
 		}
 
 		if len(restPath) == 0 {
@@ -596,7 +576,7 @@ func getValueFromPath(data interface{}, path []string) (interface{}, error) {
 	if v.Kind() == reflect.Struct {
 		field := v.FieldByName(current)
 		if !field.IsValid() {
-			return nil, fmt.Errorf("field '%s' not found in struct", current)
+			return nil, errors.T(fmt.Errorf("field '%s' not found in struct", current))
 		}
 
 		value := field.Interface()
@@ -607,7 +587,7 @@ func getValueFromPath(data interface{}, path []string) (interface{}, error) {
 		return getValueFromPath(value, restPath)
 	}
 
-	return nil, fmt.Errorf("cannot traverse path in %T", data)
+	return nil, errors.T(fmt.Errorf("cannot traverse path in %T", data))
 }
 
 // convertToSlice attempts to convert a value to a slice of interface{}

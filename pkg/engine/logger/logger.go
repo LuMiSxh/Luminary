@@ -82,10 +82,8 @@ func (l *Service) Log(level string, message string, args ...interface{}) {
 		paddedSourceInfo,
 		formattedMsg)
 
-	// Always print errors
-	if level == "ERROR" {
-		_, _ = fmt.Fprintln(os.Stderr, logEntry)
-	} else if l.Verbose {
+	// Print to console if verbose
+	if l.Verbose {
 		fmt.Println(logEntry)
 	}
 

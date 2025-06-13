@@ -21,7 +21,6 @@ import (
 	"Luminary/pkg/errors"
 	"context"
 	"encoding/json"
-	"fmt"
 	"io"
 	"net/http"
 	"net/url"
@@ -67,7 +66,7 @@ func (h *HTTPService) FetchWithRetries(ctx context.Context, url string, headers 
 
 	req, err := http.NewRequestWithContext(ctx, method, url, nil)
 	if err != nil {
-		return nil, fmt.Errorf("failed to create request: %w", err)
+		return nil, errors.TN(err)
 	}
 
 	// Apply default headers
@@ -102,8 +101,6 @@ func (h *HTTPService) FetchWithRetries(ctx context.Context, url string, headers 
 
 	// Perform request with retries
 	var resp *http.Response
-	var lastErr error
-
 	for attempt := 0; attempt <= h.DefaultRetries; attempt++ {
 		resp, err = h.DefaultClient.Do(req)
 
@@ -118,12 +115,6 @@ func (h *HTTPService) FetchWithRetries(ctx context.Context, url string, headers 
 
 		// Network or connection error - retry
 		if err != nil {
-			lastErr = &errors.HTTPError{
-				Message: "Network connection error",
-				URL:     url,
-				Err:     errors.ErrNetworkIssue,
-			}
-
 			if attempt < h.DefaultRetries {
 				// Exponential backoff
 				backoff := time.Duration(1<<uint(attempt)) * time.Second
@@ -137,11 +128,7 @@ func (h *HTTPService) FetchWithRetries(ctx context.Context, url string, headers 
 
 				select {
 				case <-ctx.Done():
-					return nil, &errors.HTTPError{
-						Message: "Request canceled",
-						URL:     url,
-						Err:     ctx.Err(),
-					}
+					return nil, errors.TN(err)
 				case <-time.After(backoff):
 					// Continue with retry
 				}
@@ -163,14 +150,6 @@ func (h *HTTPService) FetchWithRetries(ctx context.Context, url string, headers 
 				}
 			}
 
-			lastErr = &errors.HTTPError{
-				StatusCode: resp.StatusCode,
-				URL:        url,
-				Message:    http.StatusText(resp.StatusCode),
-				Body:       errorBody,
-				Err:        errors.ErrServerError,
-			}
-
 			if attempt < h.DefaultRetries {
 				// Exponential backoff
 				backoff := time.Duration(1<<uint(attempt)) * time.Second
@@ -184,11 +163,7 @@ func (h *HTTPService) FetchWithRetries(ctx context.Context, url string, headers 
 
 				select {
 				case <-ctx.Done():
-					return nil, &errors.HTTPError{
-						Message: "Request canceled during retry",
-						URL:     url,
-						Err:     ctx.Err(),
-					}
+					return nil, errors.TN(err)
 				case <-time.After(backoff):
 					// Continue with retry
 				}
@@ -212,50 +187,15 @@ func (h *HTTPService) FetchWithRetries(ctx context.Context, url string, headers 
 			// Create specific error types based on status code
 			switch resp.StatusCode {
 			case http.StatusNotFound:
-				// Extract resource type and ID from the request URL if possible
-				resourceType, resourceID := extractResourceInfo(req.URL.Path)
-				return nil, &errors.NotFoundError{
-					HTTPError: errors.HTTPError{
-						StatusCode: resp.StatusCode,
-						URL:        url,
-						Message:    "Resource not found",
-						Body:       errorBody,
-						Err:        errors.ErrNotFound,
-					},
-					ResourceType: resourceType,
-					ResourceID:   resourceID,
-				}
+				return nil, errors.TN(errors.ErrNotFound)
 			case http.StatusUnauthorized, http.StatusForbidden:
-				return nil, &errors.HTTPError{
-					StatusCode: resp.StatusCode,
-					URL:        url,
-					Message:    http.StatusText(resp.StatusCode),
-					Body:       errorBody,
-					Err:        errors.ErrUnauthorized,
-				}
+				return nil, errors.TN(errors.ErrUnauthorized)
 			case http.StatusBadRequest:
-				return nil, &errors.HTTPError{
-					StatusCode: resp.StatusCode,
-					URL:        url,
-					Message:    "Bad request",
-					Body:       errorBody,
-					Err:        errors.ErrBadRequest,
-				}
+				return nil, errors.TN(errors.ErrBadRequest)
 			case http.StatusTooManyRequests:
-				return nil, &errors.HTTPError{
-					StatusCode: resp.StatusCode,
-					URL:        url,
-					Message:    "Rate limit exceeded",
-					Body:       errorBody,
-					Err:        errors.ErrRateLimit,
-				}
+				return nil, errors.TN(errors.ErrRateLimit)
 			default:
-				return nil, &errors.HTTPError{
-					StatusCode: resp.StatusCode,
-					URL:        url,
-					Message:    http.StatusText(resp.StatusCode),
-					Body:       errorBody,
-				}
+				return nil, errors.TN(errors.ErrBadRequest)
 			}
 		}
 
@@ -263,17 +203,8 @@ func (h *HTTPService) FetchWithRetries(ctx context.Context, url string, headers 
 		return resp, nil
 	}
 
-	// All retries failed
-	if lastErr != nil {
-		return nil, lastErr
-	}
-
 	// Should never reach here, but just in case
-	return nil, &errors.HTTPError{
-		URL:     url,
-		Message: "Failed after all retries",
-		Err:     errors.ErrServerError,
-	}
+	return nil, errors.TN(errors.ErrServerError)
 }
 
 // FetchJSON fetches and parses JSON with improved error handling
@@ -296,12 +227,7 @@ func (h *HTTPService) FetchJSON(ctx context.Context, url string, result interfac
 	// Read the body
 	bodyBytes, err := io.ReadAll(resp.Body)
 	if err != nil {
-		return &errors.HTTPError{
-			StatusCode: resp.StatusCode,
-			URL:        url,
-			Message:    "Failed to read response body",
-			Err:        err,
-		}
+		return errors.TN(err)
 	}
 
 	// Log a sample of the response for debugging
@@ -316,18 +242,7 @@ func (h *HTTPService) FetchJSON(ctx context.Context, url string, result interfac
 
 	// Parse JSON into the result
 	if err := json.Unmarshal(bodyBytes, result); err != nil {
-		// If JSON parsing fails, include some of the response body in the error
-		sampleSize := 200
-		if len(bodyBytes) < sampleSize {
-			sampleSize = len(bodyBytes)
-		}
-		return &errors.HTTPError{
-			StatusCode: resp.StatusCode,
-			URL:        url,
-			Message:    fmt.Sprintf("Failed to parse JSON response: %v", err),
-			Body:       string(bodyBytes[:sampleSize]) + "...",
-			Err:        errors.ErrBadRequest,
-		}
+		return errors.TN(err)
 	}
 
 	if h.Logger != nil {
@@ -351,49 +266,8 @@ func (h *HTTPService) FetchString(ctx context.Context, url string, headers http.
 
 	data, err := io.ReadAll(resp.Body)
 	if err != nil {
-		return "", &errors.HTTPError{
-			StatusCode: resp.StatusCode,
-			URL:        url,
-			Message:    "Failed to read response",
-			Err:        err,
-		}
+		return "", errors.TN(err)
 	}
 
 	return string(data), nil
-}
-
-// Helper function to extract resource type and ID from URL path
-// E.g., "/manga/12345" -> "manga", "12345"
-func extractResourceInfo(path string) (string, string) {
-	var parts []string
-	current := ""
-
-	// Split the path into parts
-	for _, char := range path {
-		if char == '/' {
-			if current != "" {
-				parts = append(parts, current)
-				current = ""
-			}
-		} else {
-			current += string(char)
-		}
-	}
-
-	if current != "" {
-		parts = append(parts, current)
-	}
-
-	// We need at least 2 parts for type/ID
-	if len(parts) < 2 {
-		return "", ""
-	}
-
-	// The last part is likely the resource ID
-	resourceID := parts[len(parts)-1]
-
-	// The second-to-last part is likely the resource type
-	resourceType := parts[len(parts)-2]
-
-	return resourceType, resourceID
 }

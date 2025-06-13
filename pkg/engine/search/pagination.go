@@ -20,6 +20,7 @@ import (
 	"Luminary/pkg/engine/logger"
 	"Luminary/pkg/engine/network"
 	"Luminary/pkg/engine/parser"
+	"Luminary/pkg/errors"
 	"context"
 	"fmt"
 	"reflect"
@@ -158,14 +159,14 @@ func (p *PaginationService) FetchAllPages(ctx context.Context, params PaginatedR
 		)
 
 		if err != nil {
-			return nil, fmt.Errorf("failed to fetch page %d: %w", page+1, err)
+			return nil, errors.T(err)
 		}
 
 		// Extract items from the response
 		items, err := p.getItemsFromResponse(response, params.Config.ItemsPath)
 		if err != nil {
 			p.Logger.Warn("Failed to extract items using path %v: %v", params.Config.ItemsPath, err)
-			return nil, fmt.Errorf("failed to extract items from page %d: %w", page+1, err)
+			return nil, errors.TM(err, fmt.Sprintf("failed to extract items from page %d: %w", page+1))
 		}
 
 		// Get the number of items on this page
@@ -221,19 +222,19 @@ func (p *PaginationService) FetchAllPages(ctx context.Context, params PaginatedR
 // getItemsFromResponse extracts items from a response using the given path
 func (p *PaginationService) getItemsFromResponse(response interface{}, itemsPath []string) ([]interface{}, error) {
 	if response == nil {
-		return nil, fmt.Errorf("response is nil")
+		return nil, errors.T(fmt.Errorf("response is nil"))
 	}
 
 	// Extract items from the response
 	itemsData, err := p.Extractor.GetValueFromPath(response, itemsPath)
 	if err != nil {
-		return nil, fmt.Errorf("failed to extract items from response: %w", err)
+		return nil, errors.T(err)
 	}
 
 	// Convert to a slice
 	itemsValue := reflect.ValueOf(itemsData)
 	if itemsValue.Kind() != reflect.Slice && itemsValue.Kind() != reflect.Array {
-		return nil, fmt.Errorf("items path does not point to a slice or array: %v", itemsPath)
+		return nil, errors.T(fmt.Errorf("items path does not point to a slice or array: %v", itemsPath))
 	}
 
 	// Convert to []interface{}

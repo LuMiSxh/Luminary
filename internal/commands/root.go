@@ -24,9 +24,13 @@ import (
 	"github.com/spf13/cobra"
 )
 
-var maxConcurrency int
-var appEngine *engine.Engine
-var version string
+var (
+	appEngine      *engine.Engine
+	maxConcurrency int
+	version        string
+	debugMode      bool
+	verboseErrors  bool
+)
 
 var rootCmd = &cobra.Command{
 	Use:   "Luminary",
@@ -37,6 +41,9 @@ var rootCmd = &cobra.Command{
 		if appEngine == nil {
 			appEngine = engine.New()
 		}
+
+		// Set up debug mode based on flags
+		SetupDebugMode()
 	},
 	Run: func(cmd *cobra.Command, args []string) {
 		// When no command is specified, display help
@@ -60,4 +67,6 @@ func Execute() {
 func init() {
 	// Global flags
 	rootCmd.PersistentFlags().IntVar(&maxConcurrency, "concurrency", 5, "Maximum number of concurrent operations")
+	rootCmd.PersistentFlags().BoolVar(&debugMode, "debug", false, "Enable debug mode with detailed error information")
+	rootCmd.PersistentFlags().BoolVar(&verboseErrors, "verbose-errors", false, "Show function call chains in errors")
 }

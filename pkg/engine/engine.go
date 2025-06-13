@@ -22,6 +22,7 @@ import (
 	"Luminary/pkg/engine/network"
 	"Luminary/pkg/engine/parser"
 	"Luminary/pkg/engine/search"
+	"Luminary/pkg/errors"
 	"Luminary/pkg/provider"
 	"fmt"
 	"net/http"
@@ -166,7 +167,7 @@ func (e *Engine) RegisterProvider(provider provider.Provider) error {
 	defer e.providerMutex.Unlock()
 
 	if _, exists := e.providers[provider.ID()]; exists {
-		return fmt.Errorf("provider with ID '%s' already registered", provider.ID())
+		return errors.T(fmt.Errorf("provider with ID '%s' already registered", provider.ID()))
 	}
 
 	e.providers[provider.ID()] = provider

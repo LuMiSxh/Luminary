@@ -23,6 +23,7 @@ import (
 	"Luminary/pkg/provider"
 	"context"
 	"fmt"
+	"os"
 	"sync"
 	"time"
 
@@ -65,10 +66,9 @@ var listCmd = &cobra.Command{
 			var exists bool
 			selectedProvider, exists = appEngine.GetProvider(listProvider)
 			if !exists {
-				fmt.Printf("Error: Provider '%s' not found\n", listProvider)
-				fmt.Println("Available providers:")
-				for _, a := range appEngine.AllProvider() {
-					fmt.Printf("  - %s (%s)\n", a.ID(), a.Name())
+				providerErr := fmt.Errorf("provider '%s' not found", listProvider)
+				if _, err := fmt.Fprintf(os.Stderr, "%s\n", errors.FormatCLI(errors.T(providerErr))); err != nil {
+					return
 				}
 				return
 			}
@@ -95,7 +95,9 @@ var listCmd = &cobra.Command{
 			// Use empty search to get the list of manga
 			mangas, err := selectedProvider.Search(ctx, "", options)
 			if err != nil {
-				handleListError(err, selectedProvider.ID(), selectedProvider.Name(), false)
+				if _, err := fmt.Fprintln(os.Stderr, errors.FormatCLI(err)); err != nil {
+					return
+				}
 				return
 			}
 
@@ -140,8 +142,9 @@ var listCmd = &cobra.Command{
 					fmt.Printf("\n--- From provider: %s (%s) ---\n", p.ID(), p.Name())
 
 					if err != nil {
-						// Show error but continue with other providers
-						handleListError(err, p.ID(), p.Name(), true)
+						if _, err := fmt.Fprintln(os.Stderr, errors.FormatCLI(err)); err != nil {
+							return
+						}
 						return
 					}
 
@@ -155,32 +158,6 @@ var listCmd = &cobra.Command{
 			fmt.Println("\nAll providers completed processing.")
 		}
 	},
-}
-
-// handleListError provides user-friendly error messages based on error type
-func handleListError(err error, providerID, providerName string, continueOnError bool) {
-	if continueOnError {
-		if errors.IsServerError(err) {
-			fmt.Printf("  Error: Server error from %s. Skipping.\n", providerName)
-		} else if errors.Is(err, errors.ErrRateLimit) {
-			fmt.Printf("  Error: Rate limit exceeded for %s. Skipping.\n", providerName)
-		} else if errors.Is(err, context.DeadlineExceeded) {
-			fmt.Printf("  Error: Timeout fetching from %s. Skipping.\n", providerName)
-		} else {
-			fmt.Printf("  Error: %v\n", err)
-		}
-		return
-	}
-
-	if errors.IsServerError(err) {
-		fmt.Printf("Error: Server error from %s. Please try again later.\n", providerName)
-	} else if errors.Is(err, errors.ErrRateLimit) {
-		fmt.Printf("Error: Rate limit exceeded for %s. Please try again later.\n", providerName)
-	} else if errors.Is(err, context.DeadlineExceeded) {
-		fmt.Printf("Error: Timeout while fetching manga list. Try reducing the number of pages.\n")
-	} else {
-		fmt.Printf("Error: %v\n", err)
-	}
 }
 
 // Calculate an appropriate timeout based on pagination parameters for list command

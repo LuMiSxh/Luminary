@@ -54,17 +54,18 @@ var downloadCmd = &cobra.Command{
 			// Parse the chapter ID format "provider:id"
 			providerID, chapterID, err := core.ParseMangaID(combinedID)
 			if err != nil {
-				fmt.Println("Error: invalid chapter ID format, must be 'provider:id'")
+				if _, err := fmt.Fprintln(os.Stderr, errors.FormatCLI(err)); err != nil {
+					return
+				}
 				return
 			}
 
 			// Validate that the provider exists
 			prov, exists := appEngine.GetProvider(providerID)
 			if !exists {
-				fmt.Printf("Error: Provider '%s' not found\n", providerID)
-				fmt.Println("Available Provider:")
-				for _, a := range appEngine.AllProvider() {
-					fmt.Printf("  - %s (%s)\n", a.ID(), a.Name())
+				providerErr := fmt.Errorf("provider '%s' not found", providerID)
+				if _, err := fmt.Fprintf(os.Stderr, "%s\n", errors.FormatCLI(errors.T(providerErr))); err != nil {
+					return
 				}
 				return
 			}
@@ -91,46 +92,15 @@ var downloadCmd = &cobra.Command{
 			cancel()
 
 			if err != nil {
-				handleDownloadError(err, providerID, chapterID, prov.Name(), outputDir)
+				if _, err := fmt.Fprintln(os.Stderr, errors.FormatCLI(err)); err != nil {
+					return
+				}
 				return
 			}
 
 			fmt.Printf("Successfully downloaded chapter to %s\n", outputDir)
 		}
 	},
-}
-
-// handleDownloadError provides user-friendly error messages based on error type
-func handleDownloadError(err error, providerID, chapterID, providerName, outputDir string) {
-	// Check for specific error types in order of specificity
-	if errors.IsNotFound(err) {
-		// Not found error
-		fmt.Printf("Error: Chapter '%s' not found on %s\n", chapterID, providerName)
-		return
-	}
-
-	// Check for server errors
-	if errors.IsServerError(err) {
-		fmt.Printf("Error: Server error from %s. Please try again later.\n", providerName)
-		return
-	}
-
-	// Check for rate limiting
-	if errors.Is(err, errors.ErrRateLimit) {
-		fmt.Printf("Error: Rate limit exceeded for %s. Please try again later.\n", providerName)
-		return
-	}
-
-	// File system errors
-	var ioErr *os.PathError
-	if errors.As(err, &ioErr) {
-		fmt.Printf("Error: Failed to access output directory '%s': %v\n", outputDir, ioErr)
-		fmt.Println("Make sure the directory exists and you have write permissions.")
-		return
-	}
-
-	// Generic error handling
-	fmt.Printf("Error downloading chapter: %v\n", err)
 }
 
 func init() {

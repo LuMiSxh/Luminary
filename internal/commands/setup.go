@@ -16,7 +16,10 @@
 
 package commands
 
-import "Luminary/pkg/engine"
+import (
+	"Luminary/pkg/engine"
+	"Luminary/pkg/errors"
+)
 
 // SetupEngine makes the engine available to all command handlers
 func SetupEngine(e *engine.Engine) {
@@ -27,4 +30,21 @@ func SetupEngine(e *engine.Engine) {
 func SetupVersion(v string) {
 	version = v
 	rootCmd.Version = v
+}
+
+// SetupDebugMode enables debug mode for the CLI
+func SetupDebugMode() {
+	if debugMode {
+		// Create a debug formatter with all details enabled
+		debugFormatter := errors.NewDebugCLIFormatter()
+		debugFormatter.ShowDebugInfo = true
+		debugFormatter.ShowFunctionChain = true
+		debugFormatter.ShowTimestamps = true
+		errors.DefaultCLIFormatter = debugFormatter
+	} else if verboseErrors {
+		// For verbose-only mode, create a formatter that just shows function chains
+		formatter := errors.NewCLIFormatter()
+		formatter.ShowFunctionChain = true
+		errors.DefaultCLIFormatter = formatter
+	}
 }

@@ -30,7 +30,7 @@ import (
 )
 
 // ExecuteInitialize handles common provider initialization logic
-func ExecuteInitialize(ctx context.Context, e *engine.Engine, providerID, providerName string, initFunc func(context.Context) error) error {
+func ExecuteInitialize(ctx context.Context, e *engine.Engine, providerID string, providerName string, initFunc func(context.Context) error) error {
 	// Log initialization
 	e.Logger.Info("Initializing provider: %s (%s)", providerName, providerID)
 
@@ -38,11 +38,7 @@ func ExecuteInitialize(ctx context.Context, e *engine.Engine, providerID, provid
 	err := initFunc(ctx)
 	if err != nil {
 		e.Logger.Error("Failed to initialize provider %s: %v", providerID, err)
-		return &errors.ProviderError{
-			ProviderID: providerID,
-			Message:    "Failed to initialize provider",
-			Err:        err,
-		}
+		return errors.TP(err, providerID)
 	}
 
 	e.Logger.Info("Provider initialized: %s", providerID)
@@ -65,11 +61,7 @@ func ExecuteSearch(
 		ctx, providerID, query, options, apiConfig, paginationConfig, extractorSet)
 
 	if err != nil {
-		return nil, &errors.ProviderError{
-			ProviderID: providerID,
-			Message:    fmt.Sprintf("Search failed for query '%s'", query),
-			Err:        err,
-		}
+		return nil, errors.TP(err, providerID)
 	}
 
 	return results, nil
@@ -102,43 +94,19 @@ func ExecuteGetManga(
 	)
 
 	if err != nil {
-		// Check for not found error specifically
-		if errors.IsNotFound(err) {
-			return nil, errors.NewProviderNotFoundError(providerID, "manga", mangaID, err)
-		}
-
-		// For other errors, wrap with provider context
-		return nil, &errors.ProviderError{
-			ProviderID:   providerID,
-			ResourceType: "manga",
-			ResourceID:   mangaID,
-			Message:      "Failed to fetch manga",
-			Err:          err,
-		}
+		return nil, errors.TP(err, providerID)
 	}
 
 	// Extract manga data
 	result, err := e.Extractor.Extract(extractorSet, response)
 	if err != nil {
-		return nil, &errors.ProviderError{
-			ProviderID:   providerID,
-			ResourceType: "manga",
-			ResourceID:   mangaID,
-			Message:      "Failed to extract manga data",
-			Err:          err,
-		}
+		return nil, errors.TP(err, providerID)
 	}
 
 	// Convert to MangaInfo
 	mangaInfo, ok := result.(*core.MangaInfo)
 	if !ok {
-		return nil, &errors.ProviderError{
-			ProviderID:   providerID,
-			ResourceType: "manga",
-			ResourceID:   mangaID,
-			Message:      fmt.Sprintf("Expected MangaInfo, got %T", result),
-			Err:          errors.ErrInvalidInput,
-		}
+		return nil, errors.TP(err, providerID)
 	}
 
 	// Validate the result
@@ -190,32 +158,14 @@ func ExecuteGetChapter(
 	)
 
 	if err != nil {
-		// Check for not found error specifically
-		if errors.IsNotFound(err) {
-			return nil, errors.NewProviderNotFoundError(providerID, "chapter", chapterID, err)
-		}
-
-		// For other errors, wrap with provider context
-		return nil, &errors.ProviderError{
-			ProviderID:   providerID,
-			ResourceType: "chapter",
-			ResourceID:   chapterID,
-			Message:      "Failed to fetch chapter",
-			Err:          err,
-		}
+		return nil, errors.TP(err, providerID)
 	}
 
 	// Process the response with provider-specific logic
 	if processFunc != nil {
 		chapter, err := processFunc(response, chapterID)
 		if err != nil {
-			return nil, &errors.ProviderError{
-				ProviderID:   providerID,
-				ResourceType: "chapter",
-				ResourceID:   chapterID,
-				Message:      "Failed to process chapter data",
-				Err:          err,
-			}
+			return nil, errors.TP(err, providerID)
 		}
 		return chapter, nil
 	}
@@ -223,25 +173,13 @@ func ExecuteGetChapter(
 	// Or use the general extractor if no custom processing
 	result, err := e.Extractor.Extract(extractorSet, response)
 	if err != nil {
-		return nil, &errors.ProviderError{
-			ProviderID:   providerID,
-			ResourceType: "chapter",
-			ResourceID:   chapterID,
-			Message:      "Failed to extract chapter data",
-			Err:          err,
-		}
+		return nil, errors.TP(err, providerID)
 	}
 
 	// Convert to Chapter
 	chapter, ok := result.(*core.Chapter)
 	if !ok {
-		return nil, &errors.ProviderError{
-			ProviderID:   providerID,
-			ResourceType: "chapter",
-			ResourceID:   chapterID,
-			Message:      fmt.Sprintf("Expected Chapter, got %T", result),
-			Err:          errors.ErrInvalidInput,
-		}
+		return nil, errors.TP(fmt.Errorf("expected Chapter, got %T", result), providerID)
 	}
 
 	return chapter, nil
@@ -264,13 +202,7 @@ func ExecuteDownloadChapter(
 	// Get chapter information
 	chapter, err := getChapterFunc(ctx, chapterID)
 	if err != nil {
-		return &errors.ProviderError{
-			ProviderID:   providerID,
-			ResourceType: "chapter",
-			ResourceID:   chapterID,
-			Message:      "Failed to get chapter info for download",
-			Err:          err,
-		}
+		return errors.TP(err, providerID)
 	}
 
 	// Try to get manga info for proper manga title
@@ -305,13 +237,7 @@ func ExecuteDownloadChapter(
 
 	// Make sure there are pages to download
 	if len(chapter.Pages) == 0 {
-		return &errors.ProviderError{
-			ProviderID:   providerID,
-			ResourceType: "chapter",
-			ResourceID:   chapterID,
-			Message:      "Chapter has no pages to download",
-			Err:          errors.ErrInvalidInput,
-		}
+		return errors.TP(err, providerID)
 	}
 
 	// Prepare metadata
@@ -359,13 +285,7 @@ func ExecuteDownloadChapter(
 	err = e.Download.DownloadChapter(ctx, config)
 	if err != nil {
 		e.Logger.Error("[%s] Download failed: %v", providerID, err)
-		return &errors.ProviderError{
-			ProviderID:   providerID,
-			ResourceType: "chapter",
-			ResourceID:   chapterID,
-			Message:      "Download failed",
-			Err:          err,
-		}
+		return errors.TP(err, providerID)
 	}
 
 	e.Logger.Info("[%s] Successfully downloaded chapter %s", providerID, chapterID)

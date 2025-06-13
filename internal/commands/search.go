@@ -23,6 +23,7 @@ import (
 	"Luminary/pkg/provider"
 	"context"
 	"fmt"
+	"os"
 	"strings"
 	"time"
 
@@ -107,42 +108,14 @@ var searchCmd = &cobra.Command{
 		)
 
 		if err != nil {
-			handleSearchError(err, query, searchProvider)
+			if _, err := fmt.Fprintln(os.Stderr, errors.FormatCLI(err)); err != nil {
+				fmt.Printf("Error: %s\n", err)
+				return
+			}
 			return
 		}
-
 		displayConsoleResults(results, query, options)
 	},
-}
-
-// handleSearchError provides user-friendly error messages based on error type
-func handleSearchError(err error, query, providerSpec string) {
-	// Determine provider name for display
-	providerName := "all providers"
-	if providerSpec != "" {
-		providerName = providerSpec
-	}
-
-	// Check for specific error types in order of specificity
-	if errors.IsServerError(err) {
-		fmt.Printf("Error: Server error while searching with %s. Please try again later.\n", providerName)
-		return
-	}
-
-	// Check for rate limiting
-	if errors.Is(err, errors.ErrRateLimit) {
-		fmt.Printf("Error: Rate limit exceeded for %s. Please try again later.\n", providerName)
-		return
-	}
-
-	// Check for timeout errors
-	if errors.Is(err, context.DeadlineExceeded) {
-		fmt.Printf("Error: Search timed out. Try reducing the number of pages or increasing the time limit.\n")
-		return
-	}
-
-	// Generic error handling
-	fmt.Printf("Error searching: %v\n", err)
 }
 
 // Calculate an appropriate timeout based on pagination parameters
