@@ -17,14 +17,11 @@
 package commands
 
 import (
+	"Luminary/pkg/cli"
 	"Luminary/pkg/engine/core"
-	"Luminary/pkg/engine/display"
-	"Luminary/pkg/errors"
 	"Luminary/pkg/provider"
 	"context"
 	"fmt"
-	"os"
-	"strings"
 	"time"
 
 	"github.com/spf13/cobra"
@@ -78,15 +75,18 @@ var searchCmd = &cobra.Command{
 			Sort:    searchSort,
 		}
 
+		// Use the unified formatter
+		formatter := cli.DefaultFormatter
+
 		// Determine which providers to search
 		var providers []provider.Provider
 		if searchProvider != "" {
 			// Validate the provider if specified
 			if !appEngine.ProviderExists(searchProvider) {
-				fmt.Printf("Error: Provider '%s' not found\n", searchProvider)
-				fmt.Println("Available providers:")
+				formatter.PrintError(fmt.Sprintf("Error: Provider '%s' not found", searchProvider))
+				formatter.PrintInfo("Available providers:")
 				for _, a := range appEngine.AllProvider() {
-					fmt.Printf("  - %s (%s)\n", a.ID(), a.Name())
+					formatter.PrintDetail("  "+a.ID(), a.Name())
 				}
 				return
 			}
@@ -99,6 +99,15 @@ var searchCmd = &cobra.Command{
 			providers = appEngine.AllProvider()
 		}
 
+		// Display search parameters
+		formatter.PrintSearchInfo(
+			query,
+			options,
+			includeAltTitles,
+			includeAllLangs,
+			maxConcurrency,
+		)
+
 		// Execute the search using the search service
 		results, err := appEngine.Search.SearchAcrossProviders(
 			ctx,
@@ -107,14 +116,12 @@ var searchCmd = &cobra.Command{
 			options,
 		)
 
-		if err != nil {
-			if _, err := fmt.Fprintln(os.Stderr, errors.FormatCLI(err)); err != nil {
-				fmt.Printf("Error: %s\n", err)
-				return
-			}
+		if formatter.HandleError(err) {
 			return
 		}
-		displayConsoleResults(results, query, options)
+
+		// Display search results
+		formatter.PrintSearchResults(results, query, options)
 	},
 }
 
@@ -155,73 +162,6 @@ func calculateTimeout(limit, pages int, multipleProviders bool) time.Duration {
 	}
 
 	return timeoutDuration
-}
-
-// displayConsoleResults shows search results in an interactive, user-friendly format
-func displayConsoleResults(results map[string][]core.Manga, query string, options core.SearchOptions) {
-	// Calculate total result count
-	totalCount := 0
-	for _, mangaList := range results {
-		totalCount += len(mangaList)
-	}
-
-	// Print search information
-	fmt.Printf("Searching for: %s\n", query)
-
-	if len(options.Fields) > 0 {
-		fmt.Printf("Search fields: %s\n", strings.Join(options.Fields, ", "))
-	} else {
-		fmt.Println("Search fields: all")
-	}
-
-	// Display search options
-	if includeAltTitles {
-		fmt.Println("Searching in alternative titles: enabled")
-	}
-	if includeAllLangs {
-		fmt.Println("Searching across all languages: enabled")
-	}
-	fmt.Printf("Result limit: %d per page\n", options.Limit)
-	if options.Pages > 0 {
-		fmt.Printf("Pages fetched: %d\n", options.Pages)
-	} else {
-		fmt.Println("Pages fetched: all available")
-	}
-
-	// Display field-specific filters
-	if len(options.Filters) > 0 {
-		fmt.Println("Filters:")
-		for field, value := range options.Filters {
-			fmt.Printf("  %s: %s\n", field, value)
-		}
-	}
-
-	// Display concurrency information
-	fmt.Printf("Concurrency: %d\n", maxConcurrency)
-
-	fmt.Printf("\nTotal results found: %d\n\n", totalCount)
-
-	// Display results for each provider using the standardized display functions
-	if len(results) == 1 && searchProvider != "" {
-		// Display results for a single provider
-		for providerID, mangaList := range results {
-			prov, _ := appEngine.GetProvider(providerID)
-			fmt.Printf("Results from %s (%s):\n", prov.ID(), prov.Name())
-			fmt.Print(display.SearchResults(mangaList, prov))
-		}
-	} else {
-		// Display results from all providers
-		fmt.Println("Results across all providers:")
-		for providerID, mangaList := range results {
-			if len(mangaList) == 0 {
-				continue
-			}
-
-			prov, _ := appEngine.GetProvider(providerID)
-			fmt.Printf("\nFrom %s (%s):\n", prov.ID(), prov.Name())
-			fmt.Print(display.SearchResults(mangaList, prov))
-		}
-	}
 }
 
 func init() {

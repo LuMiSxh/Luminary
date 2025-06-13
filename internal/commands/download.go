@@ -17,11 +17,10 @@
 package commands
 
 import (
+	"Luminary/pkg/cli"
 	"Luminary/pkg/engine/core"
-	"Luminary/pkg/errors"
 	"context"
 	"fmt"
-	"os"
 	"time"
 
 	"github.com/spf13/cobra"
@@ -50,13 +49,13 @@ var downloadCmd = &cobra.Command{
 			ctx = core.WithVolumeOverride(ctx, downloadVolume)
 		}
 
+		// Use the unified formatter
+		formatter := cli.DefaultFormatter
+
 		for _, combinedID := range args {
 			// Parse the chapter ID format "provider:id"
 			providerID, chapterID, err := core.ParseMangaID(combinedID)
-			if err != nil {
-				if _, err := fmt.Fprintln(os.Stderr, errors.FormatCLI(err)); err != nil {
-					return
-				}
+			if formatter.HandleError(err) {
 				return
 			}
 
@@ -64,23 +63,22 @@ var downloadCmd = &cobra.Command{
 			prov, exists := appEngine.GetProvider(providerID)
 			if !exists {
 				providerErr := fmt.Errorf("provider '%s' not found", providerID)
-				if _, err := fmt.Fprintf(os.Stderr, "%s\n", errors.FormatCLI(errors.T(providerErr))); err != nil {
-					return
-				}
+				formatter.HandleError(providerErr)
 				return
 			}
 
 			outputDir := downloadOutput
 
-			fmt.Printf("Downloading chapter %s from provider %s (%s)...\n",
-				chapterID, prov.ID(), prov.Name())
-			fmt.Printf("Output directory: %s\n", downloadOutput)
-			fmt.Printf("Concurrent downloads: %d\n", maxConcurrency)
-
-			// Print volume info if provided
-			if downloadHasVolume {
-				fmt.Printf("Volume override: %d\n", downloadVolume)
-			}
+			// Display download information
+			formatter.PrintDownloadInfo(
+				chapterID,
+				prov.ID(),
+				prov.Name(),
+				outputDir,
+				maxConcurrency,
+				downloadVolume,
+				downloadHasVolume,
+			)
 
 			// Create a context with timeout
 			downloadCtx, cancel := context.WithTimeout(ctx, 10*time.Minute)
@@ -91,14 +89,11 @@ var downloadCmd = &cobra.Command{
 			// Always cancel the context when done to release resources
 			cancel()
 
-			if err != nil {
-				if _, err := fmt.Fprintln(os.Stderr, errors.FormatCLI(err)); err != nil {
-					return
-				}
+			if formatter.HandleError(err) {
 				return
 			}
 
-			fmt.Printf("Successfully downloaded chapter to %s\n", outputDir)
+			formatter.PrintSuccess(fmt.Sprintf("Successfully downloaded chapter to %s", outputDir))
 		}
 	},
 }

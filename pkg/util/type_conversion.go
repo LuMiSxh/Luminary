@@ -50,14 +50,6 @@ func CleanImageURL(dirtyURL string) string {
 	return regexp.MustCompile(`[\t\n\r]+`).ReplaceAllString(dirtyURL, "")
 }
 
-// FormatDate formats a time.Time value for display
-func FormatDate(date time.Time) string {
-	if date.IsZero() {
-		return "Unknown"
-	}
-	return date.Format("2006-01-02")
-}
-
 // FormatNullableDate formats a nullable date pointer for display
 func FormatNullableDate(date *time.Time) string {
 	if date == nil {

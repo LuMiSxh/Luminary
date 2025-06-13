@@ -18,13 +18,11 @@
 package commands
 
 import (
+	"Luminary/pkg/cli"
 	"Luminary/pkg/engine/core"
-	"Luminary/pkg/engine/display"
-	"Luminary/pkg/errors"
 	"Luminary/pkg/util"
 	"context"
 	"fmt"
-	"os"
 	"time"
 
 	"github.com/spf13/cobra"
@@ -43,16 +41,14 @@ var infoCmd = &cobra.Command{
 	Run: func(cmd *cobra.Command, args []string) {
 		providerID, mangaID, err := core.ParseMangaID(args[0])
 		if err != nil {
-			fmt.Println("Error: Invalid manga ID format, must be 'provider:id'")
+			formatter.PrintError("Error: Invalid manga ID format, must be 'provider:id'")
 			return
 		}
 
 		prov, exists := appEngine.GetProvider(providerID)
 		if !exists {
 			providerErr := fmt.Errorf("provider '%s' not found", providerID)
-			if _, err := fmt.Fprintf(os.Stderr, "%s\n", errors.FormatCLI(errors.T(providerErr))); err != nil {
-				return
-			}
+			formatter.HandleError(providerErr)
 			return
 		}
 
@@ -61,18 +57,16 @@ var infoCmd = &cobra.Command{
 		defer cancel()
 
 		manga, err := prov.GetManga(ctx, mangaID)
-		if err != nil {
-			if _, err := fmt.Fprintln(os.Stderr, errors.FormatCLI(err)); err != nil {
-				return
-			}
+		if formatter.HandleError(err) {
 			return
 		}
 
+		// Use the unified formatter
+		formatter := cli.DefaultFormatter
+
 		if manga == nil || manga.Title == "" {
 			providerErr := fmt.Errorf("manga '%s' not found on provider '%s'", mangaID, prov.Name())
-			if _, err := fmt.Fprintf(os.Stderr, "%s\n", errors.FormatCLI(errors.T(providerErr))); err != nil {
-				return
-			}
+			formatter.HandleError(providerErr)
 			return
 		}
 		if manga.Chapters == nil {
@@ -88,19 +82,19 @@ var infoCmd = &cobra.Command{
 
 				// Show filtering results
 				if len(manga.Chapters) == 0 {
-					fmt.Printf("No chapters found matching language filter: %s\n", infoLanguageFilter)
+					formatter.PrintWarning(fmt.Sprintf("No chapters found matching language filter: %s", infoLanguageFilter))
 
 					// Re-fetch to get all chapters for available languages display
 					originalManga, refetchErr := prov.GetManga(ctx, mangaID)
 					if refetchErr == nil && originalManga != nil {
-						fmt.Printf("Available languages in this manga: %s\n", util.FormatAvailableLanguages(originalManga.Chapters))
+						formatter.PrintInfo(fmt.Sprintf("Available languages in this manga: %s", util.FormatAvailableLanguages(originalManga.Chapters)))
 					} else {
-						fmt.Println("Available languages: Could not retrieve language information")
+						formatter.PrintWarning("Available languages: Could not retrieve language information")
 					}
 					return
 				} else if len(manga.Chapters) < originalChapterCount {
-					fmt.Printf("Showing %d of %d chapters (filtered by language: %s)\n",
-						len(manga.Chapters), originalChapterCount, infoLanguageFilter)
+					formatter.PrintInfo(fmt.Sprintf("Showing %d of %d chapters (filtered by language: %s)",
+						len(manga.Chapters), originalChapterCount, infoLanguageFilter))
 				}
 			}
 		}
@@ -112,23 +106,17 @@ var infoCmd = &cobra.Command{
 				// Re-fetch to get all chapters for language display
 				originalManga, err := prov.GetManga(ctx, mangaID)
 				if err == nil && originalManga != nil {
-					fmt.Printf("Available languages: %s\n\n", util.FormatAvailableLanguages(originalManga.Chapters))
+					formatter.PrintInfo(fmt.Sprintf("Available languages: %s", util.FormatAvailableLanguages(originalManga.Chapters)))
+					formatter.PrintNewLine()
 				}
 			} else {
-				fmt.Printf("Available languages: %s\n\n", util.FormatAvailableLanguages(manga.Chapters))
+				formatter.PrintInfo(fmt.Sprintf("Available languages: %s", util.FormatAvailableLanguages(manga.Chapters)))
+				formatter.PrintNewLine()
 			}
 		}
 
-		displayOptions := display.Options{
-			Level:            display.Detailed,
-			IncludeAltTitles: true,
-			ShowTags:         true,
-			ItemLimit:        0,
-			Indent:           "  ",
-			Prefix:           "",
-		}
-
-		fmt.Print(display.MangaInfo(manga, prov, displayOptions))
+		// Print manga information
+		formatter.PrintMangaInfo(manga, prov)
 	},
 }
 

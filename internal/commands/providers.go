@@ -17,10 +17,7 @@
 package commands
 
 import (
-	"fmt"
-	"sort"
-	"strings"
-
+	"Luminary/pkg/cli"
 	"github.com/spf13/cobra"
 )
 
@@ -31,27 +28,15 @@ var providersCmd = &cobra.Command{
 	Run: func(cmd *cobra.Command, args []string) {
 		allProviders := appEngine.AllProvider()
 
-		// Sort providers alphabetically
-		sort.Slice(allProviders, func(i, j int) bool {
-			return allProviders[i].Name() < allProviders[j].Name()
-		})
+		// Use the unified formatter
+		formatter := cli.DefaultFormatter
 
-		fmt.Println("Available manga source providers:")
-		fmt.Println("")
-
-		format := "%-12s %-20s %s\n"
-		fmt.Printf(format, "ID", "NAME", "DESCRIPTION")
-		fmt.Println(strings.Repeat("-", 80))
-
-		for _, provider := range allProviders {
-			fmt.Printf(format,
-				provider.ID(),
-				provider.Name(),
-				provider.Description())
+		if len(allProviders) == 0 {
+			formatter.PrintWarning("No providers are currently available.")
+			return
 		}
 
-		fmt.Println("")
-		fmt.Println("Use --provider flag with the search command to specify a particular provider")
+		formatter.PrintProviderList(allProviders)
 	},
 }
 

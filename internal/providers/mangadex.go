@@ -128,54 +128,6 @@ type MangadexProvider struct {
 	engine *engine.Engine
 }
 
-// languageCodeToName maps language codes to readable names
-var languageCodeToName = map[string]string{
-	"en": "English",
-	"ja": "Japanese",
-	"es": "Spanish",
-	"fr": "French",
-	"de": "German",
-	"pt": "Portuguese",
-	"ru": "Russian",
-	"ko": "Korean",
-	"zh": "Chinese",
-	"it": "Italian",
-	"ar": "Arabic",
-	"tr": "Turkish",
-	"th": "Thai",
-	"vi": "Vietnamese",
-	"id": "Indonesian",
-	"pl": "Polish",
-	"nl": "Dutch",
-	"sv": "Swedish",
-	"da": "Danish",
-	"no": "Norwegian",
-	"fi": "Finnish",
-	"hu": "Hungarian",
-	"cs": "Czech",
-	"sk": "Slovak",
-	"bg": "Bulgarian",
-	"hr": "Croatian",
-	"sr": "Serbian",
-	"sl": "Slovenian",
-	"et": "Estonian",
-	"lv": "Latvian",
-	"lt": "Lithuanian",
-	"ro": "Romanian",
-	"el": "Greek",
-	"he": "Hebrew",
-	"fa": "Persian",
-	"hi": "Hindi",
-	"bn": "Bengali",
-	"ta": "Tamil",
-	"te": "Telugu",
-	"ml": "Malayalam",
-	"kn": "Kannada",
-	"gu": "Gujarati",
-	"pa": "Punjabi",
-	"ur": "Urdu",
-}
-
 // convertLanguageCode converts a language code to a standardized format
 func convertLanguageCode(code string) *string {
 	if code == "" {

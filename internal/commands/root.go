@@ -17,6 +17,7 @@
 package commands
 
 import (
+	"Luminary/pkg/cli"
 	"Luminary/pkg/engine"
 	"fmt"
 	"os"
@@ -26,6 +27,7 @@ import (
 
 var (
 	appEngine      *engine.Engine
+	formatter      = cli.DefaultFormatter
 	maxConcurrency int
 	version        string
 	debugMode      bool
