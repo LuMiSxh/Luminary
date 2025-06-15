@@ -373,7 +373,7 @@ func FormatChain(err error) string {
 
 			// Show context if available
 			if len(call.Context) > 0 {
-				contextStrs := []string{}
+				var contextStrs []string
 				for k, v := range call.Context {
 					contextStrs = append(contextStrs, fmt.Sprintf("%s=%v", k, v))
 				}

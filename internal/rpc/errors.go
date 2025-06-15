@@ -49,6 +49,8 @@ func (e *Error) Error() string {
 }
 
 // Enhanced RPC Error codes with better categorization
+//
+//goland:noinspection ALL
 const (
 	// Input/Validation errors (1000-1099)
 	ErrCodeInvalidInput     = -1001
@@ -123,7 +125,8 @@ func NewError(err error, service, method string, requestData map[string]interfac
 	}
 
 	// Handle TrackedError specifically
-	if trackedErr, ok := err.(*errors.TrackedError); ok {
+	var trackedErr *errors.TrackedError
+	if errors.As(err, &trackedErr) {
 		rpcError.Message = trackedErr.Error()
 		rpcError.FunctionChain = trackedErr.GetFunctionChain()
 		rpcError.CallDetails = trackedErr.GetChain()
@@ -144,14 +147,6 @@ func NewError(err error, service, method string, requestData map[string]interfac
 
 		// Determine error code based on category and context
 		rpcError.Code = determineErrorCode(trackedErr)
-	} else {
-		// For non-tracked errors, still provide basic info
-		rpcError.Message = err.Error()
-		rpcError.OriginalError = err.Error()
-		rpcError.RootCause = err.Error()
-		rpcError.ErrorCategory = errors.CategoryUnknown
-		rpcError.Code = ErrCodeUnknownError
-		rpcError.Data["error"] = err.Error()
 	}
 
 	return rpcError
@@ -183,13 +178,13 @@ func determineErrorCode(trackedErr *errors.TrackedError) int {
 		return ErrCodeNetworkUnavailable
 
 	case errors.CategoryTimeout:
-		if strings.Contains(strings.ToLower(originalErr.Error()), "canceled") {
+		if originalErr != nil && strings.Contains(strings.ToLower(originalErr.Error()), "canceled") {
 			return ErrCodeContextCanceled
 		}
 		return ErrCodeTimeout
 
 	case errors.CategoryParsing:
-		if strings.Contains(strings.ToLower(originalErr.Error()), "json") {
+		if originalErr != nil && strings.Contains(strings.ToLower(originalErr.Error()), "json") {
 			return ErrCodeJSONError
 		}
 		return ErrCodeParsingFailed
@@ -208,30 +203,36 @@ func determineErrorCode(trackedErr *errors.TrackedError) int {
 		return ErrCodeResourceNotFound
 
 	case errors.CategoryFileSystem:
-		errStr := strings.ToLower(originalErr.Error())
-		switch {
-		case strings.Contains(errStr, "no such file"), strings.Contains(errStr, "not found"):
-			return ErrCodeFileNotFound
-		case strings.Contains(errStr, "permission"), strings.Contains(errStr, "access"):
-			return ErrCodePermissionDenied
-		case strings.Contains(errStr, "no space"), strings.Contains(errStr, "disk full"):
-			return ErrCodeInsufficientSpace
-		default:
-			return ErrCodeFileSystemError
+		if originalErr != nil {
+			errStr := strings.ToLower(originalErr.Error())
+			switch {
+			case strings.Contains(errStr, "no such file"), strings.Contains(errStr, "not found"):
+				return ErrCodeFileNotFound
+			case strings.Contains(errStr, "permission"), strings.Contains(errStr, "access"):
+				return ErrCodePermissionDenied
+			case strings.Contains(errStr, "no space"), strings.Contains(errStr, "disk full"):
+				return ErrCodeInsufficientSpace
+			default:
+				return ErrCodeFileSystemError
+			}
 		}
+		return ErrCodeFileSystemError
 
 	case errors.CategoryDownload:
-		errStr := strings.ToLower(originalErr.Error())
-		switch {
-		case strings.Contains(errStr, "interrupted"), strings.Contains(errStr, "connection"):
-			return ErrCodeDownloadInterrupted
-		case strings.Contains(errStr, "timeout"), strings.Contains(errStr, "deadline"):
-			return ErrCodeDownloadTimeout
-		case strings.Contains(errStr, "corrupted"), strings.Contains(errStr, "checksum"):
-			return ErrCodeDownloadCorrupted
-		default:
-			return ErrCodeDownloadFailed
+		if originalErr != nil {
+			errStr := strings.ToLower(originalErr.Error())
+			switch {
+			case strings.Contains(errStr, "interrupted"), strings.Contains(errStr, "connection"):
+				return ErrCodeDownloadInterrupted
+			case strings.Contains(errStr, "timeout"), strings.Contains(errStr, "deadline"):
+				return ErrCodeDownloadTimeout
+			case strings.Contains(errStr, "corrupted"), strings.Contains(errStr, "checksum"):
+				return ErrCodeDownloadCorrupted
+			default:
+				return ErrCodeDownloadFailed
+			}
 		}
+		return ErrCodeDownloadFailed
 
 	case errors.CategoryPanic:
 		return ErrCodePanic
@@ -305,32 +306,29 @@ func InvalidInput(field, value string) *Error {
 	return NewError(trackedErr, "ValidationService", "ValidateInput", requestData)
 }
 
-// NetworkError - Create network error
-func NetworkError(err error) *Error {
-	trackedErr := errors.TN(err) // Automatically categorizes as network
-	return NewError(trackedErr, "NetworkService", "Request", map[string]interface{}{})
+// FetchInfoFailed - Create fetch info failure error
+func FetchInfoFailed(err error, mangaID string) *Error {
+	trackedErr := errors.T(err) // Automatically tracks function chain
+	requestData := map[string]interface{}{"manga_id": mangaID}
+	return NewError(trackedErr, "InfoService", "Get", requestData)
 }
 
-// Timeout - Create timeout error
-func Timeout(operation string, duration time.Duration) *Error {
-	baseErr := fmt.Errorf("operation '%s' timed out after %v", operation, duration)
-	trackedErr := errors.T(baseErr)
-	requestData := map[string]interface{}{
-		"operation": operation,
-		"timeout":   duration.String(),
-	}
-	return NewError(trackedErr, "TimeoutService", operation, requestData)
+// ListMangaFailed - Create list manga failure error
+func ListMangaFailed(err error, provider string) *Error {
+	trackedErr := errors.T(err)
+	requestData := map[string]interface{}{"provider": provider}
+	return NewError(trackedErr, "ListService", "List", requestData)
 }
 
-// DownloadInterrupted - Create download interruption error
-func DownloadInterrupted(err error, url, destPath string, bytesDownloaded int64) *Error {
-	trackedErr := errors.AutoDownload(err, url, destPath, bytesDownloaded)
+// InvalidMangaData - Create invalid manga data error
+func InvalidMangaData(mangaID string, reason string) *Error {
+	baseErr := fmt.Errorf("invalid manga data for '%s': %s", mangaID, reason)
+	trackedErr := errors.WithCategory(errors.T(baseErr), errors.CategoryValidation)
 	requestData := map[string]interface{}{
-		"url":              url,
-		"destination":      destPath,
-		"bytes_downloaded": bytesDownloaded,
+		"manga_id": mangaID,
+		"reason":   reason,
 	}
-	return NewError(trackedErr, "DownloadService", "DownloadFile", requestData)
+	return NewError(trackedErr, "InfoService", "Get", requestData)
 }
 
 // Helper methods for error analysis
@@ -393,37 +391,4 @@ func (e *Error) GetHTTPStatusCode() int {
 	default:
 		return 500 // Internal Server Error
 	}
-}
-
-// ExtractRequestContext helper - now much simpler
-func ExtractRequestContext(serviceName, methodName string, args interface{}) map[string]interface{} {
-	context := map[string]interface{}{
-		"service": serviceName,
-		"method":  methodName,
-	}
-
-	// Type-specific context extraction (simplified)
-	switch v := args.(type) {
-	case *SearchRequest:
-		if v.Query != "" {
-			context["query"] = v.Query
-		}
-		if v.Provider != "" {
-			context["provider"] = v.Provider
-		}
-	case *DownloadRequest:
-		if v.ChapterID != "" {
-			context["chapter_id"] = v.ChapterID
-		}
-	case *InfoRequest:
-		if v.MangaID != "" {
-			context["manga_id"] = v.MangaID
-		}
-	case *ListRequest:
-		if v.Provider != "" {
-			context["provider"] = v.Provider
-		}
-	}
-
-	return context
 }

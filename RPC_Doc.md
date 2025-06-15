@@ -750,315 +750,184 @@ classification.
 
 ### Standard JSON-RPC Errors
 
-If a JSON-RPC request is malformed, or if an unrecoverable server-side error occurs before a specific service method can
-process the business logic, a standard JSON-RPC error response is returned:
+All RPC methods return structured errors that include comprehensive tracking information. The error object contains:
 
 ```json
 {
-  "result": null,
-  "error": {
-    "code": -32600,
-    "message": "Invalid Request"
+  "code": -1201,
+  "message": "Failed to search manga: connection timeout",
+  "data": {
+    "query": "One Piece",
+    "provider": "mangadex",
+    "timeout": "30s"
   },
-  "id": "some_id"
-}
-{
-  "result": null,
-  "error": {
-    "code": -32601,
-    "message": "Method not found"
-  },
-  "id": "some_id"
-}
-{
-  "result": null,
-  "error": {
-    "code": -32602,
-    "message": "Invalid params"
-  },
-  "id": "some_id"
-}
-{
-  "result": null,
-  "error": {
-    "code": -32700,
-    "message": "Parse error"
-  },
-  "id": null
-} 
-```
-
-### Enhanced Business Logic Errors
-
-For errors specific to service method execution, Luminary returns enhanced error objects with detailed context and
-automatic function call tracking:
-
-```json
-{
-  "result": null,
-  "error": {
-    "code": -2004,
-    "message": "Search failed for query 'one piece'",
-    "data": {
-      "query": "one piece",
-      "service": "SearchService",
-      "method": "Search"
-    },
-    "function_chain": "SearchService.Search() → ExecuteSearch() → MangadxProvider.Search() → HTTPService.DoRequest()",
-    "call_details": [
-      {
-        "function": "SearchService.Search",
-        "short_name": "SearchService.Search",
-        "operation": "search",
-        "timestamp": "2025-06-13T15:04:05.123Z",
-        "file": "services.go",
-        "line": 45
+  "function_chain": "SearchService.Search → Engine.SearchAcrossProviders → Provider.Search → HTTPClient.Do",
+  "call_details": [
+    {
+      "function": "github.com/lumisxh/luminary/internal/rpc.(*SearchService).Search",
+      "short_name": "SearchService.Search",
+      "package": "internal/rpc",
+      "file": "services.go",
+      "line": 145,
+      "timestamp": "2025-06-15T14:30:45.123Z",
+      "context": {
+        "query": "One Piece",
+        "provider": "mangadex"
       },
-      {
-        "function": "MangadxProvider.Search",
-        "short_name": "MangadxProvider.Search",
-        "operation": "search",
-        "timestamp": "2025-06-13T15:04:05.124Z",
-        "file": "mangadx.go",
-        "line": 89,
-        "context": {
-          "provider_id": "mangadx"
-        }
-      },
-      {
-        "function": "HTTPService.DoRequest",
-        "short_name": "HTTPService.DoRequest",
-        "operation": "http_request",
-        "timestamp": "2025-06-13T15:04:05.125Z",
-        "file": "client.go",
-        "line": 156,
-        "context": {
-          "url": "https://api.mangadx.org/manga",
-          "http_method": "GET",
-          "status_code": 0
-        }
-      }
-    ],
-    "error_category": "network",
-    "original_error": "dial tcp: no such host",
-    "root_cause": "no such host",
-    "timestamp": "2025-06-13T15:04:05.123Z",
-    "service": "SearchService",
-    "method": "Search"
-  },
-  "id": 7
+      "operation": "search"
+    }
+    // ... more function calls in the chain
+  ],
+  "error_category": "network",
+  "original_error": "Get \"https://api.mangadex.org/manga\": dial tcp: i/o timeout",
+  "root_cause": "dial tcp: i/o timeout",
+  "timestamp": "2025-06-15T14:30:45.123Z",
+  "service": "SearchService",
+  "method": "Search",
+  "request_id": "req_12345"
+  // if available
 }
 ```
 
-### Enhanced Error Fields
+## Enhanced Error Fields
 
-**Core Fields:**
-
-- `code`: Integer error code (see Error Codes section below)
-- `message`: Human-readable error message
-- `data`: Request context and additional data
-
-**Function Tracking Fields:**
-
-- `function_chain`: Human-readable function call path (e.g., "A() → B() → C()")
-- `call_details`: Array of detailed function call information
-    - `function`: Full function name with package path
-    - `short_name`: Simplified function name (e.g., "ServiceName.Method")
-    - `operation`: Operation being performed (search, download, http_request, etc.)
-    - `timestamp`: When this function processed the error (ISO 8601)
-    - `file`: Source file name where error was handled
-    - `line`: Line number in source file
-    - `context`: Function-specific context data
-
-**Error Classification Fields:**
-
-- `error_category`: Error type classification (see Categories section below)
-- `original_error`: The original error message that started the chain
-- `root_cause`: The deepest underlying error cause
-- `timestamp`: When the error occurred
-- `service`: RPC service name
-- `method`: RPC method name
-
-### Error Codes
-
-Luminary uses structured error codes organized by category:
-
-#### Input/Validation Errors (1000-1099)
-
-- `-1001` - Invalid input data
-- `-1002` - Invalid data format
-- `-1003` - Validation failed
-
-#### Resource/Provider Errors (1100-1199)
-
-- `-1101` - Provider not found
-- `-1102` - Resource (manga/chapter) not found
-- `-1103` - Provider error
-
-#### Operation Errors (1200-1299)
-
-- `-1201` - Search failed
-- `-1202` - Fetch failed
-- `-1203` - Download failed
-- `-1204` - List failed
-
-#### Network Errors (2000-2099)
-
-- `-2001` - Network unavailable
-- `-2002` - Network timeout
-- `-2003` - Connection failed
-- `-2004` - DNS failure
-- `-2005` - HTTP error
-
-#### Timeout Errors (2100-2199)
-
-- `-2101` - Operation timeout
-- `-2102` - Deadline exceeded
-- `-2103` - Context canceled
-
-#### Authentication/Authorization (2200-2299)
-
-- `-2201` - Authentication failed
-- `-2202` - Rate limited
-- `-2203` - Forbidden
-- `-2204` - Unauthorized
-
-#### Parsing/Data Errors (3000-3099)
-
-- `-3001` - Parsing failed
-- `-3002` - Invalid format
-- `-3003` - Data corrupted
-- `-3004` - JSON error
-- `-3005` - XML error
-
-#### File System Errors (3100-3199)
-
-- `-3101` - File not found
-- `-3102` - Permission denied
-- `-3103` - File system error
-- `-3104` - Insufficient disk space
-
-#### Download Errors (3200-3299)
-
-- `-3201` - Download interrupted
-- `-3202` - Download timeout
-- `-3203` - Download corrupted
-- `-3204` - Download failed
-
-#### System Errors (9000-9099)
-
-- `-9001` - Panic occurred
-- `-9002` - Internal error
-- `-9099` - Unknown error
+| Field            | Type    | Description                                                    |
+|------------------|---------|----------------------------------------------------------------|
+| `code`           | integer | Error code indicating the type of error                        |
+| `message`        | string  | Human-readable error message                                   |
+| `data`           | object  | Additional context data about the error                        |
+| `function_chain` | string  | Simplified view of the function call chain                     |
+| `call_details`   | array   | Detailed information about each function in the call chain     |
+| `error_category` | string  | Category of the error (e.g., "network", "provider", "parsing") |
+| `original_error` | string  | The original error message from the deepest level              |
+| `root_cause`     | string  | The root cause of the error chain                              |
+| `timestamp`      | string  | ISO 8601 timestamp when the error occurred                     |
+| `service`        | string  | RPC service that generated the error                           |
+| `method`         | string  | RPC method that generated the error                            |
+| `request_id`     | string  | Optional request ID for tracking                               |
 
 ### Error Categories
 
-Errors are automatically classified into categories for easier handling:
-
-- `network` - Network connectivity issues, DNS failures, connection problems
-- `provider` - Provider-specific issues, site unavailable
-- `parsing` - JSON/XML parsing errors, invalid response format
-- `validation` - Input validation failures
-- `timeout` - Operation timeouts, deadlines exceeded
-- `authentication` - Auth failures, rate limiting
-- `rate_limit` - Too many requests
+- `network` - Network connectivity issues
+- `provider` - Provider-specific errors
+- `parsing` - Data parsing errors
+- `validation` - Input validation errors
+- `timeout` - Operation timeouts
+- `authentication` - Auth failures
+- `rate_limit` - Rate limiting
 - `not_found` - Resource not found
-- `filesystem` - File system errors, permissions
-- `download` - Download-specific errors
-- `panic` - System panics
-- `unknown` - Unclassified errors
+- `filesystem` - File system errors
+- `download` - Download failures
+- `panic` - Recovered panics
+- `unknown` - Uncategorized errors
 
-### Error Examples
+### Error Code Ranges
 
-#### Network Connectivity Error
+- **1000-1099**: Input/Validation errors
+- **1100-1199**: Resource/Provider errors
+- **1200-1299**: Operation errors
+- **2000-2099**: Network errors
+- **2100-2199**: Timeout errors
+- **2200-2299**: Authentication/Authorization
+- **3000-3099**: Parsing/Data errors
+- **3100-3199**: File system errors
+- **3200-3299**: Download errors
+- **9000-9099**: System errors
 
-When there's no internet connection during a search:
+## Example Error Responses
+
+### Network Connectivity Error
 
 ```json
 {
-  "result": null,
-  "error": {
-    "code": -2004,
-    "message": "Search failed for query 'one piece'",
-    "function_chain": "SearchService.Search() → MangadxProvider.Search() → HTTPService.DoRequest()",
-    "error_category": "network",
-    "original_error": "dial tcp: no such host",
-    "call_details": [
-      {
-        "function": "HTTPService.DoRequest",
-        "operation": "http_request",
-        "context": {
-          "url": "https://api.mangadx.org/manga",
-          "http_method": "GET"
-        }
-      }
-    ]
+  "code": -2003,
+  "message": "Failed to connect to provider",
+  "data": {
+    "provider": "mangadex",
+    "url": "https://api.mangadex.org/manga",
+    "http_method": "GET"
   },
-  "id": 1
-}
-```
-
-#### Provider Not Found Error
-
-```json
-{
-  "result": null,
-  "error": {
-    "code": -1101,
-    "message": "Provider 'invalid_provider' not found",
-    "function_chain": "SearchService.Search() → GetProvider()",
-    "error_category": "not_found",
-    "data": {
-      "provider_id": "invalid_provider"
+  "function_chain": "SearchService.Search → HTTPClient.Do → net.Dial",
+  "call_details": [
+    {
+      "function": "github.com/lumisxh/luminary/internal/rpc.(*SearchService).Search",
+      "short_name": "SearchService.Search",
+      "package": "internal/rpc",
+      "file": "services.go",
+      "line": 145,
+      "timestamp": "2025-06-15T14:30:45.123Z",
+      "operation": "search"
+    },
+    {
+      "function": "net/http.(*Client).Do",
+      "short_name": "Client.Do",
+      "package": "net/http",
+      "file": "client.go",
+      "line": 708,
+      "timestamp": "2025-06-15T14:30:45.234Z",
+      "operation": "http_request"
     }
-  },
-  "id": 2
+  ],
+  "error_category": "network",
+  "original_error": "dial tcp 104.18.89.146:443: connect: connection refused",
+  "root_cause": "connection refused",
+  "timestamp": "2025-06-15T14:30:45.345Z",
+  "service": "SearchService",
+  "method": "Search"
 }
 ```
 
-#### Download Permission Error
+### Provider Not Found Error
 
 ```json
 {
-  "result": null,
-  "error": {
-    "code": -3102,
-    "message": "Failed to download chapter 'chapter-123'",
-    "function_chain": "DownloadService.Download() → DownloadFile() → os.Create()",
-    "error_category": "filesystem",
-    "original_error": "permission denied",
-    "data": {
-      "chapter_id": "chapter-123",
-      "destination": "/protected/downloads/"
-    }
+  "code": -1101,
+  "message": "provider 'invalid-provider' not found",
+  "data": {
+    "provider_id": "invalid-provider"
   },
-  "id": 3
-}
-```
-
-#### JSON Parsing Error
-
-```json
-{
-  "result": null,
-  "error": {
-    "code": -3004,
-    "message": "Search failed for query 'manga'",
-    "function_chain": "SearchService.Search() → MangadxProvider.Search() → json.Unmarshal()",
-    "error_category": "parsing",
-    "original_error": "invalid character '<' looking for beginning of value",
-    "call_details": [
-      {
-        "function": "json.Unmarshal",
-        "operation": "parsing",
-        "context": {
-          "data_type": "json",
-          "data_size": 1024
-        }
+  "function_chain": "InfoService.Get → Engine.GetProvider",
+  "call_details": [
+    {
+      "function": "github.com/lumisxh/luminary/internal/rpc.(*InfoService).Get",
+      "short_name": "InfoService.Get",
+      "package": "internal/rpc",
+      "file": "services.go",
+      "line": 267,
+      "timestamp": "2025-06-15T14:31:00.100Z",
+      "operation": "get",
+      "context": {
+        "manga_id": "invalid-provider:12345"
       }
-    ]
+    }
+  ],
+  "error_category": "not_found",
+  "original_error": "provider 'invalid-provider' not found",
+  "root_cause": "provider 'invalid-provider' not found",
+  "timestamp": "2025-06-15T14:31:00.100Z",
+  "service": "InfoService",
+  "method": "Get"
+}
+```
+
+### Rate Limit Error
+
+```json
+{
+  "code": -2202,
+  "message": "Rate limit exceeded for provider",
+  "data": {
+    "provider": "mangadex",
+    "retry_after": "60",
+    "limit": "5 requests per minute"
   },
-  "id": 4
+  "function_chain": "DownloadService.Download → Provider.DownloadChapter → RateLimiter.Check",
+  "error_category": "rate_limit",
+  "original_error": "HTTP 429: Too Many Requests",
+  "root_cause": "rate limit exceeded",
+  "timestamp": "2025-06-15T14:32:00.000Z",
+  "service": "DownloadService",
+  "method": "Download"
 }
 ```
 

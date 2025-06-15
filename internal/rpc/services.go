@@ -249,20 +249,12 @@ type MangaInfo struct {
 func (s *InfoService) Get(args *InfoRequest, reply *MangaInfo) error {
 	providerID, mangaID, err := core.ParseMangaID(args.MangaID)
 	if err != nil {
-		return &Error{
-			Code:    ErrCodeInvalidInput,
-			Message: fmt.Sprintf("Invalid manga_id format: %v", err),
-			Data:    map[string]interface{}{"manga_id": args.MangaID},
-		}
+		return InvalidInput("manga_id", args.MangaID) // ← USING HELPER!
 	}
 
 	prov, exists := s.Services.engine.GetProvider(providerID)
 	if !exists {
-		return &Error{
-			Code:    ErrCodeProviderNotFound,
-			Message: fmt.Sprintf("Provider '%s' not found", providerID),
-			Data:    map[string]interface{}{"provider": providerID},
-		}
+		return ProviderNotFound(providerID) // ← USING HELPER!
 	}
 
 	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
@@ -271,24 +263,12 @@ func (s *InfoService) Get(args *InfoRequest, reply *MangaInfo) error {
 	manga, err := prov.GetManga(ctx, mangaID)
 	if err != nil {
 		if errors.IsNotFound(err) {
-			return &Error{
-				Code:    ErrCodeResourceNotFound,
-				Message: fmt.Sprintf("Manga '%s' not found on provider '%s'", mangaID, prov.Name()),
-				Data:    map[string]interface{}{"manga_id": mangaID, "provider": providerID},
-			}
+			return ResourceNotFound("manga", mangaID) // ← USING HELPER!
 		}
-		return &Error{
-			Code:    ErrCodeFetchFailed,
-			Message: fmt.Sprintf("Failed to fetch manga information: %v", err),
-			Data:    map[string]interface{}{"manga_id": args.MangaID, "error": err.Error()},
-		}
+		return FetchInfoFailed(err, args.MangaID) // ← NEW HELPER!
 	}
 	if manga == nil || manga.Title == "" {
-		return &Error{
-			Code:    ErrCodeInvalidData,
-			Message: fmt.Sprintf("Retrieved empty or invalid manga data for %s", args.MangaID),
-			Data:    map[string]interface{}{"manga_id": args.MangaID},
-		}
+		return InvalidMangaData(args.MangaID, "empty or missing title") // ← NEW HELPER!
 	}
 	if manga.Chapters == nil {
 		manga.Chapters = []core.ChapterInfo{}
@@ -496,19 +476,11 @@ func (s *ListService) List(args *ListRequest, reply *ListResponse) error {
 	if !multipleProviders {
 		p, exists := s.Services.engine.GetProvider(args.Provider)
 		if !exists {
-			return &Error{
-				Code:    ErrCodeProviderNotFound,
-				Message: fmt.Sprintf("Provider '%s' not found", args.Provider),
-				Data:    map[string]interface{}{"provider": args.Provider},
-			}
+			return ProviderNotFound(args.Provider) // ← USING HELPER!
 		}
 		mangas, err := p.Search(ctx, "", options) // Empty query for listing
 		if err != nil {
-			return &Error{
-				Code:    ErrCodeSearchFailed,
-				Message: fmt.Sprintf("Error listing from provider %s: %v", args.Provider, err),
-				Data:    map[string]interface{}{"provider": args.Provider, "error": err.Error()},
-			}
+			return ListMangaFailed(err, args.Provider) // ← NEW HELPER!
 		}
 		for _, manga := range mangas {
 			allMangas = append(allMangas, SearchResultItem{
@@ -603,11 +575,7 @@ func (s *ListService) List(args *ListRequest, reply *ListResponse) error {
 				}
 			case <-ctx.Done():
 				s.Services.engine.Logger.Error("Listing operation timed out globally: %v", ctx.Err())
-				returnErr = &Error{
-					Code:    ErrCodeTimeout,
-					Message: fmt.Sprintf("Listing operation timed out: %v", ctx.Err()),
-					Data:    map[string]interface{}{"timeout": timeoutDuration.String()},
-				}
+				returnErr = Timeout("list", timeoutDuration) // ← USING HELPER!
 				select {
 				case <-waitAndCloseDone:
 				case <-time.After(2 * time.Second):
