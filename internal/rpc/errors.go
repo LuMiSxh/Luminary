@@ -331,6 +331,16 @@ func InvalidMangaData(mangaID string, reason string) *Error {
 	return NewError(trackedErr, "InfoService", "Get", requestData)
 }
 
+// Timeout - Create a timeout error
+func Timeout(method string, duration time.Duration) *Error {
+	baseErr := fmt.Errorf("%s timeout", method)
+	trackedErr := errors.WithCategory(errors.T(baseErr), errors.CategoryTimeout)
+	requestData := map[string]interface{}{
+		"duration": duration.String(),
+	}
+	return NewError(trackedErr, "ListService", method, requestData)
+}
+
 // Helper methods for error analysis
 
 // IsNetworkIssue checks if error is network-related

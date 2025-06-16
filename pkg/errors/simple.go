@@ -18,10 +18,8 @@ package errors
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
-	"net/url"
 	"strings"
 	"time"
 )
@@ -127,7 +125,7 @@ func Join(errs ...error) error {
 		return T(nonNilErrs[0])
 	}
 
-	// Create combined error message
+	// Create a combined error message
 	messages := make([]string, len(nonNilErrs))
 	for i, err := range nonNilErrs {
 		messages[i] = err.Error()
@@ -147,23 +145,39 @@ func Join(errs ...error) error {
 	var combinedCallChain []FunctionCall
 	combinedContext := make(map[string]interface{})
 
+	// Determine the predominant error category
+	categoryCounter := make(map[ErrorCategory]int)
+
 	for i, err := range nonNilErrs {
 		var existingTE *TrackedError
 		if errors.As(err, &existingTE) {
-			// Add call chain (avoiding duplicates)
+			// Count categories to determine the predominant one
+			categoryCounter[existingTE.Category]++
+
+			// Add the call chain (avoiding duplicates)
 			combinedCallChain = mergeCallChains(combinedCallChain, existingTE.CallChain)
 
-			// Merge context
+			// Merge context with prefixes to avoid key collisions
 			for k, v := range existingTE.GetContext() {
-				// Add error index prefix to avoid key collisions
-				combinedContext[fmt.Sprintf("err%d_%s", i, k)] = v
-			}
-
-			// Add category if missing
-			if te.Category == CategoryUnknown && existingTE.Category != CategoryUnknown {
-				te.Category = existingTE.Category
+				combinedContext[fmt.Sprintf("err%d_%s", i+1, k)] = v
 			}
 		}
+	}
+
+	// Determine predominant category
+	var predominantCategory ErrorCategory = CategoryUnknown
+	maxCount := 0
+
+	for category, count := range categoryCounter {
+		if count > maxCount || (count == maxCount && category != CategoryUnknown) {
+			maxCount = count
+			predominantCategory = category
+		}
+	}
+
+	// Set the category if we found a predominant one
+	if predominantCategory != CategoryUnknown {
+		te.Category = predominantCategory
 	}
 
 	// Add the merged call chains if any were found
@@ -303,24 +317,6 @@ func IsTimeout(err error) bool {
 	return isTimeoutError(strings.ToLower(err.Error()))
 }
 
-// GetCategory - Get error category
-func GetCategory(err error) ErrorCategory {
-	var te *TrackedError
-	if errors.As(err, &te) {
-		return te.GetCategory()
-	}
-	return CategoryUnknown
-}
-
-// GetFunctionChain - Get the function call path
-func GetFunctionChain(err error) string {
-	var te *TrackedError
-	if errors.As(err, &te) {
-		return te.GetFunctionChain()
-	}
-	return ""
-}
-
 // GetContext - Get error context data
 func GetContext(err error) map[string]interface{} {
 	var te *TrackedError
@@ -410,34 +406,6 @@ func FormatChain(err error) string {
 	return strings.Join(parts, "\n")
 }
 
-// FormatSimple - Simple one-line error format
-func FormatSimple(err error) string {
-	var te *TrackedError
-	ok := errors.As(err, &te)
-	if !ok {
-		return err.Error()
-	}
-
-	chain := te.GetFunctionChain()
-	if chain == "" {
-		return err.Error()
-	}
-
-	return fmt.Sprintf("[%s] %s → %s", te.Category, chain, err.Error())
-}
-
-// FormatJSON - JSON format for logging/APIs
-func FormatJSON(err error) ([]byte, error) {
-	var te *TrackedError
-	ok := errors.As(err, &te)
-	if !ok {
-		// Convert to tracked error first
-		errors.As(Track(err), &te)
-	}
-
-	return json.MarshalIndent(te, "", "  ")
-}
-
 // Debug - Print detailed error information (for development)
 func Debug(err error) {
 	if err == nil {
@@ -457,43 +425,4 @@ func Debug(err error) {
 	}
 
 	fmt.Println("========================")
-}
-
-// Summary - Get error summary for logging
-func Summary(err error) map[string]interface{} {
-	if err == nil {
-		return map[string]interface{}{"error": false}
-	}
-
-	summary := map[string]interface{}{
-		"error":   true,
-		"message": err.Error(),
-		"type":    fmt.Sprintf("%T", err),
-	}
-
-	var te *TrackedError
-	if errors.As(err, &te) {
-		summary["category"] = te.Category
-		summary["function_chain"] = te.GetFunctionChain()
-		summary["chain_length"] = len(te.CallChain)
-
-		if te.Original != nil {
-			summary["original"] = te.Original.Error()
-		}
-
-		if len(te.Context) > 0 {
-			summary["context"] = te.Context
-		}
-	}
-
-	return summary
-}
-
-func mustParseURL(rawURL string) *url.URL {
-	u, err := url.Parse(rawURL)
-	if err != nil {
-		// Return a fake URL to avoid nil pointer
-		return &url.URL{Scheme: "http", Host: "unknown", Path: rawURL}
-	}
-	return u
 }
