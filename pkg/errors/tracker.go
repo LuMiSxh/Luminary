@@ -25,51 +25,25 @@ import (
 
 // TrackedError wraps errors with automatic function call chain tracking
 type TrackedError struct {
-	// The original error that started this chain
-	Original error `json:"original_error"`
-
-	// Root cause (deepest error in the chain)
-	RootCause error `json:"root_cause"`
-
-	// Function call chain showing exact execution path
-	CallChain []FunctionCall `json:"call_chain"`
-
-	// Additional contextual data
-	Context map[string]interface{} `json:"context,omitempty"`
-
-	// User-friendly message (optional)
-	UserMessage string `json:"user_message,omitempty"`
-
-	// Error classification
-	Category ErrorCategory `json:"category"`
-
-	// Stack trace from the original error location
-	StackTrace []StackFrame `json:"stack_trace,omitempty"`
+	Original    error                  `json:"original_error"`
+	RootCause   error                  `json:"root_cause"`
+	CallChain   []FunctionCall         `json:"call_chain"`
+	Context     map[string]interface{} `json:"context,omitempty"`
+	UserMessage string                 `json:"user_message,omitempty"`
+	Category    ErrorCategory          `json:"category"`
+	StackTrace  []StackFrame           `json:"stack_trace,omitempty"`
 }
 
 // FunctionCall represents a single function in the call chain
 type FunctionCall struct {
-	// Full function name (e.g., "github.com/user/project/internal/rpc.(*SearchService).Search")
-	Function string `json:"function"`
-
-	// Short function name (e.g., "SearchService.Search")
-	ShortName string `json:"short_name"`
-
-	// Package name (e.g., "internal/rpc")
-	Package string `json:"package"`
-
-	// File and line where error was handled
-	File string `json:"file"`
-	Line int    `json:"line"`
-
-	// When this function processed the error
-	Timestamp time.Time `json:"timestamp"`
-
-	// Function-specific context
-	Context map[string]interface{} `json:"context,omitempty"`
-
-	// Operation being performed (auto-detected when possible)
-	Operation string `json:"operation,omitempty"`
+	Function  string                 `json:"function"`
+	ShortName string                 `json:"short_name"`
+	Package   string                 `json:"package"`
+	File      string                 `json:"file"`
+	Line      int                    `json:"line"`
+	Timestamp time.Time              `json:"timestamp"`
+	Context   map[string]interface{} `json:"context,omitempty"`
+	Operation string                 `json:"operation,omitempty"`
 }
 
 // StackFrame represents a single frame in the stack trace
@@ -101,11 +75,9 @@ func (e *TrackedError) Error() string {
 	if e.UserMessage != "" {
 		return e.UserMessage
 	}
-
 	if e.Original != nil {
 		return e.Original.Error()
 	}
-
 	return "unknown error"
 }
 
@@ -114,15 +86,8 @@ func (e *TrackedError) Unwrap() error {
 }
 
 func (e *TrackedError) Is(target error) bool {
-	if e.Original != nil && Is(e.Original, target) {
-		return true
-	}
-
-	if e.RootCause != nil && Is(e.RootCause, target) {
-		return true
-	}
-
-	return false
+	return (e.Original != nil && Is(e.Original, target)) ||
+		(e.RootCause != nil && Is(e.RootCause, target))
 }
 
 // GetOriginal returns the original error that started this chain
@@ -172,7 +137,7 @@ func (e *TrackedError) GetLastFunction() *FunctionCall {
 	return &e.CallChain[len(e.CallChain)-1]
 }
 
-// GetFirstFunction returns the first function in the chain (where error originated)
+// GetFirstFunction returns the first function in the chain
 func (e *TrackedError) GetFirstFunction() *FunctionCall {
 	if len(e.CallChain) == 0 {
 		return nil
@@ -189,16 +154,13 @@ func (e *TrackedError) GetContext() map[string]interface{} {
 }
 
 // Track automatically wraps an error with function call tracking
-// This is the main function you'll use - it automatically detects the calling function
 func Track(err error, context ...map[string]interface{}) error {
 	if err == nil {
 		return nil
 	}
 
-	// Get caller information - look beyond internal tracking functions
 	pc, file, line, ok := getCaller()
 	if !ok {
-		// Fallback if we can't get caller info
 		return createFallbackError(err, context...)
 	}
 
@@ -208,18 +170,14 @@ func Track(err error, context ...map[string]interface{}) error {
 	}
 
 	fullFuncName := fn.Name()
-	shortName := extractShortFunctionName(fullFuncName)
-	packageName := extractPackageName(fullFuncName)
-	fileName := extractFileName(file)
-
 	functionCall := FunctionCall{
 		Function:  fullFuncName,
-		ShortName: shortName,
-		Package:   packageName,
-		File:      fileName,
+		ShortName: extractShortFunctionName(fullFuncName),
+		Package:   extractPackageName(fullFuncName),
+		File:      extractFileName(file),
 		Line:      line,
 		Timestamp: time.Now(),
-		Operation: detectOperation(shortName),
+		Operation: detectOperation(extractShortFunctionName(fullFuncName)),
 	}
 
 	// Merge context if provided
@@ -230,42 +188,35 @@ func Track(err error, context ...map[string]interface{}) error {
 	// If already a TrackedError, add to chain but preserve the original category
 	var trackedErr *TrackedError
 	if errors.As(err, &trackedErr) {
-		// Only append to call chain without re-classifying the error
 		trackedErr.CallChain = append(trackedErr.CallChain, functionCall)
 		return trackedErr
 	}
 
-	// Create new TrackedError - only classify if it's a new tracked error
-	category := classifyError(err)
-	stackTrace := captureStackTrace()
-
+	// Create new TrackedError
 	return &TrackedError{
 		Original:   err,
 		RootCause:  findRootCause(err),
 		CallChain:  []FunctionCall{functionCall},
 		Context:    make(map[string]interface{}),
-		Category:   category,
-		StackTrace: stackTrace,
+		Category:   classifyError(err),
+		StackTrace: captureStackTrace(),
 	}
 }
 
 // getCaller walks up the stack to find the first non-tracking function
 func getCaller() (uintptr, string, int, bool) {
-	// These are package/file patterns from our error tracking library
 	internalPatterns := []string{
 		"pkg/errors/tracker.go",
 		"pkg/errors/simple.go",
 		"pkg/errors/coverage.go",
 	}
 
-	// Look up to 10 frames up the stack to find the first non-internal call
 	for i := 1; i < 10; i++ {
 		pc, file, line, ok := runtime.Caller(i)
 		if !ok {
 			break
 		}
 
-		// Check if this is an internal call
 		isInternal := false
 		for _, pattern := range internalPatterns {
 			if strings.Contains(file, pattern) {
@@ -274,13 +225,11 @@ func getCaller() (uintptr, string, int, bool) {
 			}
 		}
 
-		// If not an internal call, return this caller
 		if !isInternal {
 			return pc, file, line, true
 		}
 	}
 
-	// If we couldn't find a non-internal caller, return the immediate caller
 	return runtime.Caller(1)
 }
 
@@ -306,21 +255,13 @@ func TrackWithContext(err error, contextData map[string]interface{}) error {
 	return trackedErr
 }
 
-// Convenience functions that automatically detect function context
-
 // TrackNetwork marks an error as network-related
 func TrackNetwork(err error, context ...map[string]interface{}) error {
-	// First track the error normally to add function call info
 	trackedErr := Track(err, context...)
 
-	// If it's not already a network error, update the category
 	var te *TrackedError
-	if errors.As(trackedErr, &te) {
-		// Only override category if not already categorized as network
-		// or if it's unknown (default)
-		if te.Category == CategoryUnknown {
-			te.Category = CategoryNetwork
-		}
+	if errors.As(trackedErr, &te) && te.Category == CategoryUnknown {
+		te.Category = CategoryNetwork
 	}
 
 	return trackedErr
@@ -335,16 +276,11 @@ func TrackProvider(err error, providerID string, context ...map[string]interface
 		}
 	}
 
-	// First track the error normally to add function call info
 	trackedErr := Track(err, ctx)
 
-	// If it's not already categorized, mark as provider error
 	var te *TrackedError
-	if errors.As(trackedErr, &te) {
-		// Only override category if unknown (default)
-		if te.Category == CategoryUnknown {
-			te.Category = CategoryProvider
-		}
+	if errors.As(trackedErr, &te) && te.Category == CategoryUnknown {
+		te.Category = CategoryProvider
 	}
 
 	return trackedErr
@@ -353,45 +289,40 @@ func TrackProvider(err error, providerID string, context ...map[string]interface
 // Helper functions
 
 func extractShortFunctionName(fullName string) string {
-	// Convert "github.com/user/project/internal/rpc.(*SearchService).Search"
-	// to "SearchService.Search"
-
-	if idx := strings.LastIndex(fullName, "."); idx != -1 {
-		shortName := fullName[idx+1:]
-
-		// Handle method calls like "(*SearchService).Search"
-		if strings.Contains(fullName, "(*") && strings.Contains(fullName, ")") {
-			start := strings.LastIndex(fullName, "(*")
-			end := strings.Index(fullName[start:], ").")
-			if start != -1 && end != -1 {
-				structName := fullName[start+2 : start+end]
-				return structName + "." + shortName
-			}
-		}
-
-		return shortName
+	idx := strings.LastIndex(fullName, ".")
+	if idx == -1 {
+		return fullName
 	}
 
-	return fullName
+	shortName := fullName[idx+1:]
+
+	// Handle method calls like "(*SearchService).Search"
+	if strings.Contains(fullName, "(*") && strings.Contains(fullName, ")") {
+		start := strings.LastIndex(fullName, "(*")
+		end := strings.Index(fullName[start:], ").")
+		if start != -1 && end != -1 {
+			structName := fullName[start+2 : start+end]
+			return structName + "." + shortName
+		}
+	}
+
+	return shortName
 }
 
 func extractPackageName(fullName string) string {
-	// Extract package name from full function name
 	parts := strings.Split(fullName, ".")
-	if len(parts) > 1 {
-		// Remove the last part (function name) and join the rest
-		packageParts := parts[:len(parts)-1]
-		packageName := strings.Join(packageParts, ".")
-
-		// Extract just the package part, not the full module path
-		if idx := strings.LastIndex(packageName, "/"); idx != -1 {
-			return packageName[idx+1:]
-		}
-
-		return packageName
+	if len(parts) <= 1 {
+		return "unknown"
 	}
 
-	return "unknown"
+	packageParts := parts[:len(parts)-1]
+	packageName := strings.Join(packageParts, ".")
+
+	if idx := strings.LastIndex(packageName, "/"); idx != -1 {
+		return packageName[idx+1:]
+	}
+
+	return packageName
 }
 
 func extractFileName(fullPath string) string {
@@ -516,8 +447,8 @@ func isFileSystemError(errStr string) bool {
 func captureStackTrace() []StackFrame {
 	var frames []StackFrame
 
-	// Capture up to 10 stack frames
-	for i := 2; i < 12; i++ {
+	// Capture up to 20 frames, skipping the first two (this function and getCaller)
+	for i := 2; i < 22; i++ {
 		pc, file, line, ok := runtime.Caller(i)
 		if !ok {
 			break
@@ -551,7 +482,6 @@ func findRootCause(err error) error {
 }
 
 func createFallbackError(err error, context ...map[string]interface{}) error {
-	// Fallback when we can't get caller info
 	functionCall := FunctionCall{
 		Function:  "unknown",
 		ShortName: "unknown",
