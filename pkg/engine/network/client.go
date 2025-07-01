@@ -102,6 +102,8 @@ func (h *HTTPService) FetchWithRetries(ctx context.Context, url string, headers 
 
 	// Perform request with retries
 	var resp *http.Response
+	var allErrors []error // Collect all errors during retries
+
 	for attempt := 0; attempt <= h.DefaultRetries; attempt++ {
 		resp, err = h.DefaultClient.Do(req)
 
@@ -109,6 +111,8 @@ func (h *HTTPService) FetchWithRetries(ctx context.Context, url string, headers 
 		if h.Logger != nil {
 			if err != nil {
 				h.Logger.Debug("[HTTP] Request failed (attempt %d/%d): %v", attempt+1, h.DefaultRetries+1, err)
+				// Add attempt context to the error
+				allErrors = append(allErrors, errors.TM(err, fmt.Sprintf("attempt %d/%d failed", attempt+1, h.DefaultRetries+1)))
 			} else {
 				h.Logger.Debug("[HTTP] Response received (attempt %d/%d): status %d", attempt+1, h.DefaultRetries+1, resp.StatusCode)
 			}
@@ -129,7 +133,9 @@ func (h *HTTPService) FetchWithRetries(ctx context.Context, url string, headers 
 
 				select {
 				case <-ctx.Done():
-					return nil, errors.TN(err)
+					ctxErr := errors.TM(ctx.Err(), "request canceled by context")
+					allErrors = append(allErrors, ctxErr)
+					return nil, errors.TN(errors.Join(allErrors...))
 				case <-time.After(backoff):
 					// Continue with retry
 				}
@@ -151,6 +157,13 @@ func (h *HTTPService) FetchWithRetries(ctx context.Context, url string, headers 
 				}
 			}
 
+			// Create a server error and add it to the list
+			serverErr := errors.TM(
+				fmt.Errorf("server returned %d status code", resp.StatusCode),
+				fmt.Sprintf("attempt %d/%d: server error %d", attempt+1, h.DefaultRetries+1, resp.StatusCode),
+			)
+			allErrors = append(allErrors, serverErr)
+
 			if attempt < h.DefaultRetries {
 				// Exponential backoff
 				backoff := time.Duration(1<<uint(attempt)) * time.Second
@@ -164,7 +177,8 @@ func (h *HTTPService) FetchWithRetries(ctx context.Context, url string, headers 
 
 				select {
 				case <-ctx.Done():
-					return nil, errors.TN(err)
+					allErrors = append(allErrors, errors.TM(ctx.Err(), "request canceled by context during backoff"))
+					return nil, errors.TN(errors.Join(allErrors...))
 				case <-time.After(backoff):
 					// Continue with retry
 				}
@@ -204,8 +218,13 @@ func (h *HTTPService) FetchWithRetries(ctx context.Context, url string, headers 
 		return resp, nil
 	}
 
-	// Should never reach here, but just in case
-	return nil, errors.TN(fmt.Errorf("HTTP request failed - Could be a network problem"))
+	// All retry attempts failed - use errors.Join to combine all errors
+	if len(allErrors) > 0 {
+		return nil, errors.Join(allErrors...)
+	}
+
+	// This should rarely happen (if allErrors is empty after retries), but for completeness
+	return nil, errors.TN(fmt.Errorf("HTTP request failed after %d attempts", h.DefaultRetries+1))
 }
 
 // FetchJSON fetches and parses JSON with improved error handling

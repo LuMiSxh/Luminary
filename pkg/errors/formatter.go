@@ -422,6 +422,56 @@ func (f *CLIFormatter) formatDebugInfo(trackedErr *TrackedError) string {
 		parts = append(parts, fmt.Sprintf("%s %s",
 			f.DetailLabelStyle.Sprint("Original Error:"),
 			f.DetailValueStyle.Sprint(trackedErr.Original.Error())))
+
+		// Check if this is a joined error (from errors.Join)
+		originalErrors, hasOriginals := trackedErr.Context["original_errors"]
+		if hasOriginals {
+			parts = append(parts, "")
+			parts = append(parts, f.SubtitleStyle.Sprint("Component Errors:"))
+
+			if errSlice, ok := originalErrors.([]error); ok {
+				for i, componentErr := range errSlice {
+					// Extract the original error message
+					errMessage := componentErr.Error()
+
+					// Try to get the underlying error if it's a tracked error
+					var componentTracked *TrackedError
+					if errors.As(componentErr, &componentTracked) {
+						parts = append(parts, fmt.Sprintf("  %d. %s %s",
+							i+1,
+							f.HighlightStyle.Sprint(errMessage),
+							f.SecondaryStyle.Sprintf("(category: %s)", componentTracked.Category)))
+
+						// Show component's context if available
+						if len(componentTracked.Context) > 0 {
+							parts = append(parts, f.DetailLabelStyle.Sprint("     Context:"))
+							for k, v := range componentTracked.Context {
+								parts = append(parts, fmt.Sprintf("       %s: %s",
+									f.DetailLabelStyle.Sprint(k),
+									f.DetailValueStyle.Sprint(v)))
+							}
+						}
+
+						// Show underlying error if different from the message
+						if componentTracked.RootCause != nil &&
+							componentTracked.RootCause.Error() != errMessage {
+							parts = append(parts, fmt.Sprintf("     %s %s",
+								f.DetailLabelStyle.Sprint("Root cause:"),
+								f.WarningStyle.Sprint(componentTracked.RootCause.Error())))
+						}
+					} else {
+						// Simple error (not tracked)
+						parts = append(parts, fmt.Sprintf("  %d. %s",
+							i+1,
+							f.DetailValueStyle.Sprint(errMessage)))
+					}
+				}
+			} else {
+				// Fallback if original_errors is not properly typed
+				parts = append(parts, fmt.Sprintf("  %s",
+					f.DetailValueStyle.Sprint(originalErrors)))
+			}
+		}
 	}
 
 	if trackedErr.RootCause != nil && !errors.Is(trackedErr.RootCause, trackedErr.Original) {
@@ -435,6 +485,11 @@ func (f *CLIFormatter) formatDebugInfo(trackedErr *TrackedError) string {
 		parts = append(parts, "")
 		parts = append(parts, f.SubtitleStyle.Sprint("Global Context:"))
 		for k, v := range trackedErr.Context {
+			// Skip original_errors as we've already displayed it in a better format
+			if k == "original_errors" {
+				continue
+			}
+
 			parts = append(parts, fmt.Sprintf("  %s %s",
 				f.DetailLabelStyle.Sprintf("%s:", k),
 				f.DetailValueStyle.Sprint(v)))

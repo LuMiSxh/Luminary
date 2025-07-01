@@ -70,5 +70,5 @@ func init() {
 	// Global flags
 	rootCmd.PersistentFlags().IntVar(&maxConcurrency, "concurrency", 5, "Maximum number of concurrent operations")
 	rootCmd.PersistentFlags().BoolVar(&debugMode, "debug", false, "Enable debug mode with detailed error information")
-	rootCmd.PersistentFlags().BoolVar(&verboseErrors, "verbose-errors", false, "Show function call chains in errors")
+	rootCmd.PersistentFlags().BoolVar(&verboseErrors, "verbose", false, "Show function call chains in errors")
 }

@@ -17,20 +17,12 @@
 package errors
 
 import (
-	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
-	"net/url"
 	"strings"
-	"time"
 )
 
-// SIMPLE API - These are the only functions you need to use in most cases
-// They automatically detect function names and classify errors
-
-// T (Track) - The main function you'll use everywhere
-// Wrap any error with T(err) and it automatically handles everything
+// T (Track) - Wrap any error with automatic tracking
 func T(err error) error {
 	if err == nil {
 		return nil
@@ -38,7 +30,7 @@ func T(err error) error {
 	return Track(err)
 }
 
-// TC (Track with Context) - Add custom context data
+// TC - Track with custom context data
 func TC(err error, context map[string]interface{}) error {
 	if err == nil {
 		return nil
@@ -46,7 +38,7 @@ func TC(err error, context map[string]interface{}) error {
 	return Track(err, context)
 }
 
-// TM (Track with Message) - Add a user-friendly message
+// TM - Track with user-friendly message
 func TM(err error, message string) error {
 	if err == nil {
 		return nil
@@ -54,7 +46,7 @@ func TM(err error, message string) error {
 	return TrackWithMessage(err, message)
 }
 
-// TN (Track Network) - For network/HTTP errors
+// TN - Track network errors
 func TN(err error) error {
 	if err == nil {
 		return nil
@@ -62,7 +54,7 @@ func TN(err error) error {
 	return TrackNetwork(err)
 }
 
-// TP (Track Provider) - For provider-specific errors
+// TP - Track provider-specific errors
 func TP(err error, providerID string) error {
 	if err == nil {
 		return nil
@@ -71,16 +63,12 @@ func TP(err error, providerID string) error {
 }
 
 // WithCategory - Explicitly set the error category
-// Use this when you need to force a specific category
 func WithCategory(err error, category ErrorCategory) error {
 	if err == nil {
 		return nil
 	}
 
-	// First track the error
 	trackedErr := T(err)
-
-	// Then set the category explicitly
 	var te *TrackedError
 	if errors.As(trackedErr, &te) {
 		te.Category = category
@@ -89,8 +77,7 @@ func WithCategory(err error, category ErrorCategory) error {
 	return trackedErr
 }
 
-// ForceCategory - Force change the category of an existing error
-// Similar to WithCategory but doesn't add a new tracking point
+// ForceCategory - Force change category of an existing error
 func ForceCategory(err error, category ErrorCategory) error {
 	if err == nil {
 		return nil
@@ -98,18 +85,15 @@ func ForceCategory(err error, category ErrorCategory) error {
 
 	var te *TrackedError
 	if errors.As(err, &te) {
-		// Create a copy of the tracked error with the new category
 		newTE := *te
 		newTE.Category = category
 		return &newTE
 	}
 
-	// If not already tracked, track it with the specified category
 	return WithCategory(err, category)
 }
 
 // Join - Combine multiple errors into a single tracked error
-// Usage: err := errors.Join(err1, err2, err3)
 func Join(errs ...error) error {
 	// Filter out nil errors
 	var nonNilErrs []error
@@ -132,8 +116,7 @@ func Join(errs ...error) error {
 	for i, err := range nonNilErrs {
 		messages[i] = err.Error()
 	}
-	combinedMessage := strings.Join(messages, "; ")
-	combinedErr := fmt.Errorf("multiple errors: %s", combinedMessage)
+	combinedErr := fmt.Errorf("multiple errors: %s", strings.Join(messages, "; "))
 
 	// Track the combined error
 	trackedErr := Track(combinedErr)
@@ -143,33 +126,41 @@ func Join(errs ...error) error {
 	// Store original errors in context
 	te.Context["original_errors"] = nonNilErrs
 
-	// Merge call chains and contexts from any TrackedErrors
+	// Merge call chains and contexts
 	var combinedCallChain []FunctionCall
 	combinedContext := make(map[string]interface{})
+	categoryCounter := make(map[ErrorCategory]int)
 
 	for i, err := range nonNilErrs {
 		var existingTE *TrackedError
 		if errors.As(err, &existingTE) {
-			// Add call chain (avoiding duplicates)
+			categoryCounter[existingTE.Category]++
 			combinedCallChain = mergeCallChains(combinedCallChain, existingTE.CallChain)
 
-			// Merge context
 			for k, v := range existingTE.GetContext() {
-				// Add error index prefix to avoid key collisions
-				combinedContext[fmt.Sprintf("err%d_%s", i, k)] = v
-			}
-
-			// Add category if missing
-			if te.Category == CategoryUnknown && existingTE.Category != CategoryUnknown {
-				te.Category = existingTE.Category
+				combinedContext[fmt.Sprintf("err%d_%s", i+1, k)] = v
 			}
 		}
 	}
 
-	// Add the merged call chains if any were found
+	// Determine predominant category
+	var predominantCategory = CategoryUnknown
+	maxCount := 0
+
+	for category, count := range categoryCounter {
+		if count > maxCount || (count == maxCount && category != CategoryUnknown) {
+			maxCount = count
+			predominantCategory = category
+		}
+	}
+
+	// Set the category if found a predominant one
+	if predominantCategory != CategoryUnknown {
+		te.Category = predominantCategory
+	}
+
+	// Add the merged call chains
 	if len(combinedCallChain) > 0 {
-		// Keep the first entry in te.CallChain (from Track call above)
-		// and append the merged chains
 		if len(te.CallChain) > 0 {
 			te.CallChain = append(te.CallChain, combinedCallChain...)
 		} else {
@@ -213,11 +204,7 @@ func mergeCallChains(chain1, chain2 []FunctionCall) []FunctionCall {
 	return result
 }
 
-// AUTOMATIC ERROR DETECTION
-// These functions automatically detect and wrap common error types
-
 // Must - Convert any function call to a tracked error
-// Usage: result := Must(someFunction())
 func Must[V any](value V, err error) V {
 	if err != nil {
 		panic(T(err))
@@ -226,11 +213,9 @@ func Must[V any](value V, err error) V {
 }
 
 // Try - Safely execute a function and return tracked error
-// Usage: err := Try(func() error { return someFunction() })
 func Try(fn func() error) error {
 	defer func() {
 		if r := recover(); r != nil {
-			// Convert panic to tracked error
 			var err error
 			switch v := r.(type) {
 			case error:
@@ -248,79 +233,6 @@ func Try(fn func() error) error {
 	return nil
 }
 
-// WithTimeout - Create context with timeout and automatic error tracking
-func WithTimeout(parent context.Context, timeout time.Duration) (context.Context, context.CancelFunc, error) {
-	ctx, cancel := context.WithTimeout(parent, timeout)
-
-	// Return a wrapped cancel function that tracks context errors
-	wrappedCancel := func() {
-		cancel()
-		if ctx.Err() != nil {
-			// Context error occurred
-			_ = AutoContext(ctx.Err(), ctx)
-		}
-	}
-
-	return ctx, wrappedCancel, nil
-}
-
-// ANALYSIS FUNCTIONS
-// These help you understand what went wrong
-
-// IsNetwork - Check if error is network-related
-func IsNetwork(err error) bool {
-	var te *TrackedError
-	if errors.As(err, &te) {
-		return te.IsCategory(CategoryNetwork)
-	}
-	return isNetworkError(strings.ToLower(err.Error()))
-}
-
-// IsProvider - Check if error is provider-related
-func IsProvider(err error) bool {
-	var te *TrackedError
-	if errors.As(err, &te) {
-		return te.IsCategory(CategoryProvider)
-	}
-	return false
-}
-
-// IsParsing - Check if error is parsing-related
-func IsParsing(err error) bool {
-	var te *TrackedError
-	if errors.As(err, &te) {
-		return te.IsCategory(CategoryParsing)
-	}
-	return isParsingError(strings.ToLower(err.Error()))
-}
-
-// IsTimeout - Check if error is timeout-related
-func IsTimeout(err error) bool {
-	var te *TrackedError
-	if errors.As(err, &te) {
-		return te.IsCategory(CategoryTimeout)
-	}
-	return isTimeoutError(strings.ToLower(err.Error()))
-}
-
-// GetCategory - Get error category
-func GetCategory(err error) ErrorCategory {
-	var te *TrackedError
-	if errors.As(err, &te) {
-		return te.GetCategory()
-	}
-	return CategoryUnknown
-}
-
-// GetFunctionChain - Get the function call path
-func GetFunctionChain(err error) string {
-	var te *TrackedError
-	if errors.As(err, &te) {
-		return te.GetFunctionChain()
-	}
-	return ""
-}
-
 // GetContext - Get error context data
 func GetContext(err error) map[string]interface{} {
 	var te *TrackedError
@@ -328,172 +240,4 @@ func GetContext(err error) map[string]interface{} {
 		return te.GetContext()
 	}
 	return nil
-}
-
-// FORMATTING FUNCTIONS
-
-// FormatChain - Human-readable error chain (enhanced version)
-func FormatChain(err error) string {
-	var te *TrackedError
-	ok := errors.As(err, &te)
-	if !ok {
-		return err.Error()
-	}
-
-	var parts []string
-
-	// User message if available
-	if te.UserMessage != "" {
-		parts = append(parts, fmt.Sprintf("Error: %s", te.UserMessage))
-	} else {
-		parts = append(parts, fmt.Sprintf("Error: %s", te.Error()))
-	}
-
-	// Function call chain (this is the new improved part)
-	if len(te.CallChain) > 0 {
-		parts = append(parts, "\nFunction Call Chain:")
-
-		// Calculate total duration if we have timestamps
-		var totalTime time.Duration
-		if len(te.CallChain) > 1 {
-			firstTime := te.CallChain[0].Timestamp
-			lastTime := te.CallChain[len(te.CallChain)-1].Timestamp
-			totalTime = lastTime.Sub(firstTime)
-		}
-
-		for i, call := range te.CallChain {
-			timestamp := call.Timestamp.Format("15:04:05.000")
-			parts = append(parts, fmt.Sprintf("  %d. [%s] %s() at %s:%d",
-				i+1, timestamp, call.ShortName, call.File, call.Line))
-
-			// Show operation if detected
-			if call.Operation != "" {
-				parts = append(parts, fmt.Sprintf("      Operation: %s", call.Operation))
-			}
-
-			// Show context if available
-			if len(call.Context) > 0 {
-				contextStrs := []string{}
-				for k, v := range call.Context {
-					contextStrs = append(contextStrs, fmt.Sprintf("%s=%v", k, v))
-				}
-				parts = append(parts, fmt.Sprintf("      Context: %s", strings.Join(contextStrs, ", ")))
-			}
-		}
-
-		// Add total time if we have it
-		if totalTime > 0 {
-			parts = append(parts, fmt.Sprintf("  Total time: %.2fms", float64(totalTime.Microseconds())/1000))
-		}
-	}
-
-	// Error category
-	if te.Category != CategoryUnknown {
-		parts = append(parts, fmt.Sprintf("\nCategory: %s", te.Category))
-	}
-
-	// Original error
-	if te.Original != nil {
-		parts = append(parts, fmt.Sprintf("\nOriginal Error: %v", te.Original))
-	}
-
-	// Root cause if different
-	if te.RootCause != nil && !errors.Is(te.RootCause, te.Original) {
-		parts = append(parts, fmt.Sprintf("Root Cause: %v", te.RootCause))
-	}
-
-	// Additional context
-	if len(te.Context) > 0 {
-		parts = append(parts, fmt.Sprintf("\nAdditional Context: %v", te.Context))
-	}
-
-	return strings.Join(parts, "\n")
-}
-
-// FormatSimple - Simple one-line error format
-func FormatSimple(err error) string {
-	var te *TrackedError
-	ok := errors.As(err, &te)
-	if !ok {
-		return err.Error()
-	}
-
-	chain := te.GetFunctionChain()
-	if chain == "" {
-		return err.Error()
-	}
-
-	return fmt.Sprintf("[%s] %s → %s", te.Category, chain, err.Error())
-}
-
-// FormatJSON - JSON format for logging/APIs
-func FormatJSON(err error) ([]byte, error) {
-	var te *TrackedError
-	ok := errors.As(err, &te)
-	if !ok {
-		// Convert to tracked error first
-		errors.As(Track(err), &te)
-	}
-
-	return json.MarshalIndent(te, "", "  ")
-}
-
-// Debug - Print detailed error information (for development)
-func Debug(err error) {
-	if err == nil {
-		fmt.Println("No error")
-		return
-	}
-
-	fmt.Println("=== ERROR DEBUG INFO ===")
-	fmt.Println(FormatChain(err))
-
-	var te *TrackedError
-	if errors.As(err, &te) && len(te.StackTrace) > 0 {
-		fmt.Println("\nStack Trace:")
-		for i, frame := range te.StackTrace {
-			fmt.Printf("  %d. %s at %s:%d\n", i+1, frame.Function, frame.File, frame.Line)
-		}
-	}
-
-	fmt.Println("========================")
-}
-
-// Summary - Get error summary for logging
-func Summary(err error) map[string]interface{} {
-	if err == nil {
-		return map[string]interface{}{"error": false}
-	}
-
-	summary := map[string]interface{}{
-		"error":   true,
-		"message": err.Error(),
-		"type":    fmt.Sprintf("%T", err),
-	}
-
-	var te *TrackedError
-	if errors.As(err, &te) {
-		summary["category"] = te.Category
-		summary["function_chain"] = te.GetFunctionChain()
-		summary["chain_length"] = len(te.CallChain)
-
-		if te.Original != nil {
-			summary["original"] = te.Original.Error()
-		}
-
-		if len(te.Context) > 0 {
-			summary["context"] = te.Context
-		}
-	}
-
-	return summary
-}
-
-func mustParseURL(rawURL string) *url.URL {
-	u, err := url.Parse(rawURL)
-	if err != nil {
-		// Return a fake URL to avoid nil pointer
-		return &url.URL{Scheme: "http", Host: "unknown", Path: rawURL}
-	}
-	return u
 }
