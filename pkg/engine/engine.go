@@ -76,7 +76,6 @@ func New() *Engine {
 
 	// Create logger first
 	log := logger.NewService(logFile)
-	log.SetLevel(logger.LevelInfo)
 
 	// Create simplified services
 	networkClient := network.NewClient(log)

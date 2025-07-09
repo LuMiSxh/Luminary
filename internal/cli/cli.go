@@ -43,6 +43,9 @@ func NewApp(engine *engine.Engine, version string) *cli.App {
 		},
 		Before: func(c *cli.Context) error {
 			// Set error formatting modes based on flags
+			fmt.Printf("Args: %v\n", c.Args().Slice())
+			fmt.Printf("Flags: %v\n", c.FlagNames())
+
 			if c.Bool("debug") {
 				engine.SetDebugMode(true)
 			} else if c.Bool("verbose") {
