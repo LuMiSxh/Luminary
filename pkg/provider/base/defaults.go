@@ -51,14 +51,6 @@ func (p *Provider) defaultAPISearch(ctx context.Context, query string, options c
 		q.Set("limit", fmt.Sprintf("%d", options.Limit))
 	}
 
-	// Apply filters if provided
-	if options.Filters != nil && len(options.Filters) > 0 {
-		for key, value := range options.Filters {
-			// Use standard key=value format for filters
-			q.Set(key, fmt.Sprintf("%v", value))
-		}
-	}
-
 	u.RawQuery = q.Encode()
 
 	// Make request
@@ -152,23 +144,6 @@ func (p *Provider) defaultWebSearch(ctx context.Context, query string, options c
 		searchURL = p.Config.SiteURL + "/search?q=" + url.QueryEscape(query)
 	}
 
-	// Add filters to the search URL if provided
-	if options.Filters != nil && len(options.Filters) > 0 {
-		// Check if we need to add query parameters
-		if !strings.Contains(searchURL, "?") {
-			searchURL += "?"
-		} else if !strings.HasSuffix(searchURL, "&") {
-			searchURL += "&"
-		}
-
-		params := url.Values{}
-		for key, value := range options.Filters {
-			params.Add(key, fmt.Sprintf("%v", value))
-		}
-
-		searchURL += params.Encode()
-	}
-
 	// Make request
 	resp, err := p.Engine.Network.Request(ctx, &network.Request{
 		URL:       searchURL,
@@ -185,7 +160,6 @@ func (p *Provider) defaultWebSearch(ctx context.Context, query string, options c
 	// Check if we have a valid response
 	if resp == nil || resp.Body == nil {
 		return nil, errors.New("received empty response from server").
-			WithContext("search_url", searchURL).
 			AsNetwork().Error()
 	}
 

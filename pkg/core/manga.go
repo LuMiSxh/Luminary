@@ -64,13 +64,12 @@ type Page struct {
 
 // SearchOptions configures search behavior
 type SearchOptions struct {
-	Query            string                 `json:"query"`
-	Limit            int                    `json:"limit"`
-	Pages            int                    `json:"pages"`
-	Sort             string                 `json:"sort,omitempty"`
-	Filters          map[string]interface{} `json:"filters,omitempty"`
-	IncludeAltTitles bool                   `json:"include_alt_titles,omitempty"`
-	Concurrency      int                    `json:"concurrency,omitempty"`
+	Query            string `json:"query"`
+	Limit            int    `json:"limit"`
+	Pages            int    `json:"pages"`
+	Sort             string `json:"sort,omitempty"`
+	IncludeAltTitles bool   `json:"include_alt_titles,omitempty"`
+	Concurrency      int    `json:"concurrency,omitempty"`
 }
 
 // DownloadOptions configures download behavior

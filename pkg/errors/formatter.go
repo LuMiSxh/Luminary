@@ -22,6 +22,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"math"
 	"strings"
 
 	"github.com/fatih/color"
@@ -405,7 +406,7 @@ func (f *CLIFormatter) formatFunctionChain(trackedErr *TrackedError) string {
 	// Calculate and show total execution time if timestamps are enabled
 	if f.ShowTimestamps && len(trackedErr.CallChain) > 0 {
 		duration := trackedErr.CallChain[len(trackedErr.CallChain)-1].Timestamp.Sub(trackedErr.CallChain[0].Timestamp)
-		parts = append(parts, fmt.Sprintf("  Total time: %s", f.HighlightStyle.Sprintf("%.2fms", float64(duration.Nanoseconds())/1e6)))
+		parts = append(parts, fmt.Sprintf("  Total time: %s", f.HighlightStyle.Sprintf("%.2fms", math.Abs(float64(duration.Nanoseconds())/1e6))))
 	}
 
 	return strings.Join(parts, "\n")

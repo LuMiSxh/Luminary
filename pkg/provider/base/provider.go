@@ -82,6 +82,9 @@ type WebConfig struct {
 	MangaPath  string
 	// CSS selectors for common elements
 	Selectors map[string]string
+	// Filter support
+	FilterSupport    bool
+	SupportedFilters map[string]bool
 }
 
 // MadaraConfig for Madara WordPress theme sites
