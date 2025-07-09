@@ -153,14 +153,13 @@ type SearchService struct {
 }
 
 type SearchRequest struct {
-	Query            string                 `json:"query"`
-	Provider         string                 `json:"provider,omitempty"`
-	Limit            int                    `json:"limit,omitempty"`
-	Pages            int                    `json:"pages,omitempty"`
-	Sort             string                 `json:"sort,omitempty"`
-	Filters          map[string]interface{} `json:"filters,omitempty"`
-	IncludeAltTitles bool                   `json:"include_alt_titles,omitempty"`
-	Concurrency      int                    `json:"concurrency,omitempty"`
+	Query            string `json:"query"`
+	Provider         string `json:"provider,omitempty"`
+	Limit            int    `json:"limit,omitempty"`
+	Pages            int    `json:"pages,omitempty"`
+	Sort             string `json:"sort,omitempty"`
+	IncludeAltTitles bool   `json:"include_alt_titles,omitempty"`
+	Concurrency      int    `json:"concurrency,omitempty"`
 }
 
 type SearchResultItem struct {
@@ -194,7 +193,6 @@ func (s *SearchService) Search(req *SearchRequest, resp *SearchResponse) error {
 		Limit:            req.Limit,
 		Pages:            req.Pages,
 		Sort:             req.Sort,
-		Filters:          req.Filters,
 		IncludeAltTitles: req.IncludeAltTitles,
 		Concurrency:      req.Concurrency,
 	}

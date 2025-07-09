@@ -189,15 +189,6 @@ Performs a manga search.
   // Optional: Number of pages to fetch (default: 1)
   "sort": "relevance",
   // Optional: "relevance", "name", "newest", "updated"
-  "fields": [
-    "title",
-    "author"
-  ],
-  // Optional: Fields to search in
-  "filters": {
-    "genre": "action"
-  },
-  // Optional: Field-specific filters
   "include_alt_titles": true,
   // Optional: Include alternative titles (default: false)
   "concurrency": 5
@@ -271,9 +262,9 @@ Performs a manga search.
 
 Lists manga from providers, typically without a specific search query.
 
-#### `ListService.List`
+#### `ListService.Latest`
 
-Retrieves a list of manga.
+Retrieves a list of the latest manga.
 
 **Request Parameters (`args_object`):**
 
@@ -283,10 +274,8 @@ Retrieves a list of manga.
   // Optional: If omitted, lists from all.
   "limit": 50,
   // Optional: Max results (default: 50)
-  "pages": 1,
-  // Optional: Number of pages (default: 1, 0 for all if supported by provider)
-  "concurrency": 5
-  // Optional: Max concurrent operations (default: 5)
+  "page": 1
+  // Optional: Page number (default: 1)
 }
 ```
 
@@ -294,7 +283,7 @@ Retrieves a list of manga.
 
 ```json
 {
-  "method": "ListService.List",
+  "method": "ListService.Latest",
   "params": [
     {
       "limit": 2
@@ -308,30 +297,18 @@ Retrieves a list of manga.
 
 ```json
 {
-  "mangas": [
+  "results": [
     {
       "id": "mgd:200e4c75-ce67-4dbf-8f91-a502f49c20e9",
       "title": "Ironking",
       "provider": "mgd",
-      "provider_name": "MangaDex",
-      "authors": [
-        "Author A"
-      ],
-      "tags": [
-        "Tag1"
-      ]
+      "provider_name": "MangaDex"
     },
     {
       "id": "kmg:kissmanga/saving-the-world-through-a-game",
       "title": "Saving the World Through a Game",
       "provider": "kmg",
-      "provider_name": "KissManga",
-      "authors": [
-        "Author B"
-      ],
-      "tags": [
-        "Tag2"
-      ]
+      "provider_name": "KissManga"
     }
   ],
   "count": 2,
@@ -344,7 +321,7 @@ Retrieves a list of manga.
 
 **Fields:**
 
-- `mangas`: An array of `SearchResultItem` objects (same structure as in `SearchService.Search` results).
+- `results`: An array of `ListItem` objects with basic manga information.
 - `count`: Total number of manga returned.
 - `provider`: Provider ID (empty if listing from all, or the specific provider ID if filtered).
 - `provider_name`: "Multiple Providers" or the specific provider name if filtered.
@@ -535,7 +512,7 @@ The `language_filter` parameter accepts:
 
 Handles downloading of manga chapters.
 
-#### `DownloadService.Download`
+#### `DownloadService.Chapter`
 
 Initiates the download of a specific manga chapter.
 
@@ -545,12 +522,8 @@ Initiates the download of a specific manga chapter.
 {
   "chapter_id": "provider_id:chapter_specific_id",
   // e.g., "mgd:chapter-456"
-  "output_dir": "./downloads",
+  "output_dir": "./downloads"
   // Optional: Default is "./downloads"
-  "volume": 1,
-  // Optional: Override volume number
-  "concurrency": 5
-  // Optional: Max concurrent page downloads (default: 5)
 }
 ```
 
@@ -558,7 +531,7 @@ Initiates the download of a specific manga chapter.
 
 ```json
 {
-  "method": "DownloadService.Download",
+  "method": "DownloadService.Chapter",
   "params": [
     {
       "chapter_id": "mgd:chapter-456",
@@ -573,24 +546,19 @@ Initiates the download of a specific manga chapter.
 
 ```json
 {
-  "chapter_id": "chapter-456",
-  // The chapter ID part (without provider prefix)
-  "provider": "mgd",
-  "provider_name": "MangaDex",
-  "output_dir": "./my_manga",
   "success": true,
-  "message": "Successfully downloaded chapter mgd:chapter-456 to ./my_manga"
+  "message": "Chapter downloaded successfully",
+  "path": "./my_manga",
+  "page_count": 24
 }
 ```
 
 **Fields:**
 
-- `chapter_id`: The original chapter ID part (without the provider prefix).
-- `provider`: Provider ID.
-- `provider_name`: Provider display name.
-- `output_dir`: Directory where the chapter was saved.
 - `success`: Boolean indicating if the download was successful.
 - `message`: A status message (can include error details if `success` is `false`).
+- `path`: Directory where the chapter was saved.
+- `page_count`: Number of pages downloaded (optional).
 
 **Note:** If the download fails, `success` will be `false`, and the `message` field will contain the error. The RPC call
 itself will still be a "successful" JSON-RPC response unless there's a fundamental issue with the request format or
@@ -598,338 +566,35 @@ server. The business logic error is conveyed within the `result` payload.
 
 ![Separator](.github/assets/luminary-separator.png)
 
-## Language Support
-
-### Supported Language Codes
-
-Luminary supports the following language codes and names for filtering:
-
-**Common Language Codes (ISO 639-1):**
-
-- `en` - English
-- `ja` - Japanese
-- `es` - Spanish
-- `fr` - French
-- `de` - German
-- `pt` - Portuguese
-- `ru` - Russian
-- `ko` - Korean
-- `zh` - Chinese
-- `it` - Italian
-- `ar` - Arabic
-- `tr` - Turkish
-- `th` - Thai
-- `vi` - Vietnamese
-- `id` - Indonesian
-- `pl` - Polish
-- `nl` - Dutch
-- `sv` - Swedish
-- `da` - Danish
-- `no` - Norwegian
-- `fi` - Finnish
-- `hu` - Hungarian
-- `cs` - Czech
-- `sk` - Slovak
-- `bg` - Bulgarian
-- `hr` - Croatian
-- `sr` - Serbian
-- `sl` - Slovenian
-- `et` - Estonian
-- `lv` - Latvian
-- `lt` - Lithuanian
-- `ro` - Romanian
-- `el` - Greek
-- `he` - Hebrew
-- `fa` - Persian
-- `hi` - Hindi
-- `bn` - Bengali
-- `ta` - Tamil
-- `te` - Telugu
-- `ml` - Malayalam
-- `kn` - Kannada
-- `gu` - Gujarati
-- `pa` - Punjabi
-- `ur` - Urdu
-- `uk` - Ukrainian
-
-**Extended Language Codes:**
-
-- `zh-cn` - Chinese (Simplified)
-- `zh-tw` - Chinese (Traditional)
-- `zh-hk` - Chinese (Hong Kong)
-- `pt-br` - Portuguese (Brazil)
-- `es-la` - Spanish (Latin America)
-
-**Special Values:**
-
-- `unknown` or `none` - Chapters with no specified language
-
-### Language Filtering Examples
-
-**Filter by single language:**
-
-```json
-{
-  "method": "InfoService.Get",
-  "params": [
-    {
-      "manga_id": "mgd:123",
-      "language_filter": "en"
-    }
-  ],
-  "id": 1
-}
-```
-
-**Filter by multiple languages:**
-
-```json
-{
-  "method": "InfoService.Get",
-  "params": [
-    {
-      "manga_id": "mgd:123",
-      "language_filter": "en,ja,es"
-    }
-  ],
-  "id": 1
-}
-```
-
-**Filter by language names:**
-
-```json
-{
-  "method": "InfoService.Get",
-  "params": [
-    {
-      "manga_id": "mgd:123",
-      "language_filter": "english,japanese"
-    }
-  ],
-  "id": 1
-}
-```
-
-**Include unknown language chapters:**
-
-```json
-{
-  "method": "InfoService.Get",
-  "params": [
-    {
-      "manga_id": "mgd:123",
-      "language_filter": "en,unknown"
-    }
-  ],
-  "id": 1
-}
-```
-
-**Show available languages:**
-
-```json
-{
-  "method": "InfoService.Get",
-  "params": [
-    {
-      "manga_id": "mgd:123",
-      "show_languages": true
-    }
-  ],
-  "id": 1
-}
-```
-
-![Separator](.github/assets/luminary-separator.png)
-
 ## Error Handling
 
-Luminary's JSON-RPC interface provides comprehensive error information with automatic function call tracking and error
-classification.
-
-### Standard JSON-RPC Errors
-
-All RPC methods return structured errors that include comprehensive tracking information. The error object contains:
+When an error occurs, the `error` field in the JSON-RPC response will be non-null. The `error.message` field will contain a descriptive string.
 
 ```json
 {
-  "code": -1201,
-  "message": "Failed to search manga: connection timeout",
-  "data": {
-    "query": "One Piece",
-    "provider": "mangadex",
-    "timeout": "30s"
+  "result": null,
+  "error": {
+    "code": -32603,
+    "message": "rpc: service/method request ill-formed: Providers.NonExistentMethod"
   },
-  "function_chain": "SearchService.Search → Engine.SearchAcrossProviders → Provider.Search → HTTPClient.Do",
-  "call_details": [
-    {
-      "function": "github.com/lumisxh/luminary/internal/rpc.(*SearchService).Search",
-      "short_name": "SearchService.Search",
-      "package": "internal/rpc",
-      "file": "services.go",
-      "line": 145,
-      "timestamp": "2025-06-15T14:30:45.123Z",
-      "context": {
-        "query": "One Piece",
-        "provider": "mangadex"
-      },
-      "operation": "search"
-    }
-    // ... more function calls in the chain
-  ],
-  "error_category": "network",
-  "original_error": "Get \"https://api.mangadex.org/manga\": dial tcp: i/o timeout",
-  "root_cause": "dial tcp: i/o timeout",
-  "timestamp": "2025-06-15T14:30:45.123Z",
-  "service": "SearchService",
-  "method": "Search",
-  "request_id": "req_12345"
-  // if available
+  "id": 1
 }
 ```
 
-## Enhanced Error Fields
+For application-level errors, Luminary's advanced error system provides detailed, formatted messages.
 
-| Field            | Type    | Description                                                    |
-|------------------|---------|----------------------------------------------------------------|
-| `code`           | integer | Error code indicating the type of error                        |
-| `message`        | string  | Human-readable error message                                   |
-| `data`           | object  | Additional context data about the error                        |
-| `function_chain` | string  | Simplified view of the function call chain                     |
-| `call_details`   | array   | Detailed information about each function in the call chain     |
-| `error_category` | string  | Category of the error (e.g., "network", "provider", "parsing") |
-| `original_error` | string  | The original error message from the deepest level              |
-| `root_cause`     | string  | The root cause of the error chain                              |
-| `timestamp`      | string  | ISO 8601 timestamp when the error occurred                     |
-| `service`        | string  | RPC service that generated the error                           |
-| `method`         | string  | RPC method that generated the error                            |
-| `request_id`     | string  | Optional request ID for tracking                               |
-
-### Error Categories
-
-- `network` - Network connectivity issues
-- `provider` - Provider-specific errors
-- `parsing` - Data parsing errors
-- `validation` - Input validation errors
-- `timeout` - Operation timeouts
-- `authentication` - Auth failures
-- `rate_limit` - Rate limiting
-- `not_found` - Resource not found
-- `filesystem` - File system errors
-- `download` - Download failures
-- `panic` - Recovered panics
-- `unknown` - Uncategorized errors
-
-### Error Code Ranges
-
-- **1000-1099**: Input/Validation errors
-- **1100-1199**: Resource/Provider errors
-- **1200-1299**: Operation errors
-- **2000-2099**: Network errors
-- **2100-2199**: Timeout errors
-- **2200-2299**: Authentication/Authorization
-- **3000-3099**: Parsing/Data errors
-- **3100-3199**: File system errors
-- **3200-3299**: Download errors
-- **9000-9099**: System errors
-
-## Example Error Responses
-
-### Network Connectivity Error
-
+**Example (Provider Not Found):**
 ```json
 {
-  "code": -2003,
-  "message": "Failed to connect to provider",
-  "data": {
-    "provider": "mangadex",
-    "url": "https://api.mangadex.org/manga",
-    "http_method": "GET"
+  "result": null,
+  "error": {
+    "code": 0,
+    "message": "[PROVIDER] provider 'invalid-id' not found"
   },
-  "function_chain": "SearchService.Search → HTTPClient.Do → net.Dial",
-  "call_details": [
-    {
-      "function": "github.com/lumisxh/luminary/internal/rpc.(*SearchService).Search",
-      "short_name": "SearchService.Search",
-      "package": "internal/rpc",
-      "file": "services.go",
-      "line": 145,
-      "timestamp": "2025-06-15T14:30:45.123Z",
-      "operation": "search"
-    },
-    {
-      "function": "net/http.(*Client).Do",
-      "short_name": "Client.Do",
-      "package": "net/http",
-      "file": "client.go",
-      "line": 708,
-      "timestamp": "2025-06-15T14:30:45.234Z",
-      "operation": "http_request"
-    }
-  ],
-  "error_category": "network",
-  "original_error": "dial tcp 104.18.89.146:443: connect: connection refused",
-  "root_cause": "connection refused",
-  "timestamp": "2025-06-15T14:30:45.345Z",
-  "service": "SearchService",
-  "method": "Search"
+  "id": 5
 }
 ```
-
-### Provider Not Found Error
-
-```json
-{
-  "code": -1101,
-  "message": "provider 'invalid-provider' not found",
-  "data": {
-    "provider_id": "invalid-provider"
-  },
-  "function_chain": "InfoService.Get → Engine.GetProvider",
-  "call_details": [
-    {
-      "function": "github.com/lumisxh/luminary/internal/rpc.(*InfoService).Get",
-      "short_name": "InfoService.Get",
-      "package": "internal/rpc",
-      "file": "services.go",
-      "line": 267,
-      "timestamp": "2025-06-15T14:31:00.100Z",
-      "operation": "get",
-      "context": {
-        "manga_id": "invalid-provider:12345"
-      }
-    }
-  ],
-  "error_category": "not_found",
-  "original_error": "provider 'invalid-provider' not found",
-  "root_cause": "provider 'invalid-provider' not found",
-  "timestamp": "2025-06-15T14:31:00.100Z",
-  "service": "InfoService",
-  "method": "Get"
-}
-```
-
-### Rate Limit Error
-
-```json
-{
-  "code": -2202,
-  "message": "Rate limit exceeded for provider",
-  "data": {
-    "provider": "mangadex",
-    "retry_after": "60",
-    "limit": "5 requests per minute"
-  },
-  "function_chain": "DownloadService.Download → Provider.DownloadChapter → RateLimiter.Check",
-  "error_category": "rate_limit",
-  "original_error": "HTTP 429: Too Many Requests",
-  "root_cause": "rate limit exceeded",
-  "timestamp": "2025-06-15T14:32:00.000Z",
-  "service": "DownloadService",
-  "method": "Download"
-}
-```
+The client can parse this message to understand the error category (e.g., `[PROVIDER]`). If the server were run in a debug mode (not currently supported via RPC), the message would contain a full stack trace and context.
 
 ![Separator](.github/assets/luminary-separator.png)
 

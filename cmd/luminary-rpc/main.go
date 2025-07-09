@@ -28,22 +28,12 @@ import (
 	"net/rpc/jsonrpc"
 	"os"
 	"os/signal"
-	"runtime"
 	"syscall"
 )
 
 var (
 	Version = "dev"
 )
-
-// GetRuntimeInfo returns runtime information
-func GetRuntimeInfo() rpc.RuntimeInfo {
-	return rpc.RuntimeInfo{
-		GoVersion: runtime.Version(),
-		OS:        runtime.GOOS,
-		Arch:      runtime.GOARCH,
-	}
-}
 
 // stdInOutReadWriteCloser wraps stdin/stdout for JSON-RPC
 type stdInOutReadWriteCloser struct {

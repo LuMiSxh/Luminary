@@ -43,12 +43,6 @@ Find manga by title, author, genre, or any combination with advanced filtering o
 # Basic search
 luminary search "one piece"
 
-# Search with specific fields
-luminary search "dragon" --fields title,author
-
-# Apply filters
-luminary search "adventure" --filter genre=fantasy,author="eiichiro oda"
-
 # Control results
 luminary search "manga title" --limit 20 --sort popularity
 ```
@@ -59,13 +53,13 @@ Download chapters directly to your device with configurable options for concurre
 
 ```bash
 # Download a chapter
-luminary download provider:chapter-id
+luminary download <provider:chapter-id>
 
 # Multiple chapters
-luminary download provider:chapter-id-1 provider:chapter-id-2
+luminary download <provider:chapter-id-1> <provider:chapter-id-2>
 
 # Configure download options
-luminary download provider:chapter-id --output ./my-manga --format jpeg --concurrent 10
+luminary download <provider:chapter-id> --output ./my-manga --format jpeg --concurrent 10
 ```
 
 ### RPC Interface
@@ -73,7 +67,7 @@ luminary download provider:chapter-id --output ./my-manga --format jpeg --concur
 Luminary offers a dedicated JSON-RPC executable (`luminary-rpc`) for more robust programmatic integration. 
 This mode allows communication over stdin/stdout using the JSON-RPC 2.0 protocol, providing access to all core 
 functionalities. For detailed information on using the RPC interface, 
-please see the [JSON-RPC Documentation](RPC_Doc.md).
+please see the [JSON-RPC Documentation](RPC_DOCUMENTATION.md).
 
 ![Separator](.github/assets/luminary-separator.png)
 
@@ -85,28 +79,18 @@ please see the [JSON-RPC Documentation](RPC_Doc.md).
 luminary providers
 ```
 
-### List Manga from a Source
-
-```bash
-# List all manga
-luminary list
-
-# List manga from a specific provider (e.g., "mgd" for MangaDex)
-luminary list --provider mgd
-```
-
 ### Get Detailed Information
 
 ```bash
 # Get manga details including all chapters
-luminary info provider:manga-id
+luminary info <provider:manga-id>
 ```
 
 ### Download Manga
 
 ```bash
 # Download a specific chapter
-luminary download provider:chapter-id
+luminary download <provider:chapter-id>
 ```
 
 ![Separator](.github/assets/luminary-separator.png)
@@ -115,15 +99,15 @@ luminary download provider:chapter-id
 
 ### Structured Error Handling
 
-Luminary provides human-readable error messages with detailed debug information available when needed.
+Human-readable error messages with optional debug info, call chains, and troubleshooting suggestions.
 
 ### Fast & Concurrent
 
 Powered by Go's concurrency features, Luminary downloads manga efficiently with configurable concurrency limits.
 
-### Extensible Provider System
+### Unified Provider Framework
 
-A plugin-like architecture makes it easy to add support for new manga sources through the provider interface.
+A unified provider framework makes adding new sources simple and consistent through a plugin-like architecture.
 
 ### Rate Limiting
 
@@ -141,19 +125,21 @@ You can also open an issue if you find a bug or have a feature request.
 ### Adding a New Provider
 
 Luminary supports adding new manga sources through its provider interface. For more information, see
-the [Provider Implementation Guide](internal/providers/provider.md).
+the [Provider Implementation Guide](internal/providers/IMPLEMENTATION_GUIDE.md).
 
 ```go
 // Example: Simplified provider implementation
-func NewProvider(e *engine.Engine) provider.Provider {
-return &MyProvider{
-engine: e,
-config: MyProviderConfig{
-ID:          "mys",
-Name:        "My Source",
-Description: "My manga source description",
-SiteURL:     "https://mysource.com",
-},
+func init() {
+    registry.Register(NewMyProviderProvider)
 }
+
+func NewMyProviderProvider(e *engine.Engine) engine.Provider {
+    return base.New(e, base.Config{
+        ID:          "mys",
+        Name:        "My Source",
+        Description: "My manga source description",
+        SiteURL:     "https://mysource.com",
+        Type:        base.TypeWeb,
+    }).Build()
 }
 ```
