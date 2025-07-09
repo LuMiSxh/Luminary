@@ -723,11 +723,6 @@ var (
 
 // Convenience functions
 
-// FormatCLI formats an error for CLI display using the default formatter
-func FormatCLI(err error) string {
-	return DefaultCLIFormatter.Format(err)
-}
-
 // FormatCLISimple formats an error for simple CLI display
 func FormatCLISimple(err error) string {
 	return DefaultCLIFormatter.FormatSimple(err)

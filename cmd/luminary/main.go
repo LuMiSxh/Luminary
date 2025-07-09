@@ -74,7 +74,7 @@ func main() {
 	app := cli.NewApp(eng, Version)
 
 	// Run CLI
-	if err := app.Run(os.Args); err != nil {
+	if err := app.Run(context.Background(), os.Args); err != nil {
 		_, err := fmt.Fprintf(os.Stderr, "Error: %v\n", err)
 		if err != nil {
 			return

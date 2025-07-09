@@ -153,6 +153,9 @@ func trackError(err error, context ...map[string]interface{}) *TrackedError {
 		// Add new function to call chain
 		pc, file, line, _ := runtime.Caller(2)
 		fn := runtime.FuncForPC(pc)
+		if fn == nil { // Add nil check for fn
+			return tracked
+		}
 
 		call := FunctionCall{
 			Function:  fn.Name(),
@@ -163,7 +166,7 @@ func trackError(err error, context ...map[string]interface{}) *TrackedError {
 			Timestamp: time.Now(),
 		}
 
-		if len(context) > 0 {
+		if len(context) > 0 && context[0] != nil { // Add nil check for context
 			call.Context = context[0]
 		}
 
@@ -184,6 +187,9 @@ func trackError(err error, context ...map[string]interface{}) *TrackedError {
 	// Add initial function to call chain
 	pc, file, line, _ := runtime.Caller(2)
 	fn := runtime.FuncForPC(pc)
+	if fn == nil { // Add nil check for fn
+		return te
+	}
 
 	call := FunctionCall{
 		Function:  fn.Name(),
@@ -194,7 +200,7 @@ func trackError(err error, context ...map[string]interface{}) *TrackedError {
 		Timestamp: time.Now(),
 	}
 
-	if len(context) > 0 {
+	if len(context) > 0 && context[0] != nil { // Add nil check for context
 		call.Context = context[0]
 		// Also add to main context
 		for k, v := range context[0] {
@@ -355,7 +361,13 @@ func Is(err, target error) bool {
 
 // As finds the first error in err's chain that matches target
 func As(err error, target interface{}) bool {
-	return errors.As(err, &target)
+	if err == nil {
+		return false
+	}
+
+	// We do NOT write "&target" here because we want to support both pointer and non-pointer targets
+	//goland:noinspection GoErrorsAs
+	return errors.As(err, target)
 }
 
 // Unwrap returns the result of calling the Unwrap method on err
@@ -383,16 +395,37 @@ func Join(errs ...error) error {
 	// Create combined error
 	combinedErr := fmt.Errorf("multiple errors: %d errors occurred", len(nonNil))
 
-	// Track the combined error
+	// Track the combined error with proper error handling
 	te := trackError(combinedErr)
+	if te == nil {
+		return combinedErr // Fallback if tracking fails
+	}
+
 	te.Context["error_count"] = len(nonNil)
 	te.Context["errors"] = nonNil
+
+	// Collect call chains from all source errors
+	var allCallChains []FunctionCall
+
+	// First add the current call chain (where Join was called)
+	allCallChains = append(allCallChains, te.CallChain...)
+
+	// Then add call chains from all original errors
+	for _, err := range nonNil {
+		var tracked *TrackedError
+		if err != nil && As(err, &tracked) && tracked != nil {
+			allCallChains = append(allCallChains, tracked.CallChain...)
+		}
+	}
+
+	// Replace the call chain with the merged one
+	te.CallChain = allCallChains
 
 	// Determine predominant category
 	categoryCount := make(map[ErrorCategory]int)
 	for _, err := range nonNil {
 		var tracked *TrackedError
-		if As(err, &tracked) {
+		if err != nil && As(err, &tracked) && tracked != nil {
 			categoryCount[tracked.Category]++
 		}
 	}

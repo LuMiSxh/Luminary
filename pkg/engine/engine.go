@@ -59,8 +59,7 @@ type Engine struct {
 	providerMutex sync.RWMutex
 
 	// Error formatting options
-	debugMode   bool
-	verboseMode bool
+	debugMode bool
 }
 
 // New creates a new Engine with default configuration
@@ -203,44 +202,13 @@ func (e *Engine) getProviderIDs() []string {
 // SetDebugMode enables or disables debug mode for error formatting
 func (e *Engine) SetDebugMode(enabled bool) {
 	e.debugMode = enabled
+
+	// Update log level
 	if enabled {
 		e.Logger.SetLevel(logger.LevelDebug)
-		// Enable console output for debug mode
-		if loggerService, ok := e.Logger.(*logger.Service); ok {
-			loggerService.SetConsoleOutput(true)
-		}
 		e.Logger.Debug("Debug mode enabled")
 	} else {
-		// Reset to info level when debug is disabled
 		e.Logger.SetLevel(logger.LevelInfo)
-		// Only disable console output if verbose mode is also off
-		if !e.verboseMode {
-			if loggerService, ok := e.Logger.(*logger.Service); ok {
-				loggerService.SetConsoleOutput(false)
-			}
-		}
-	}
-}
-
-// SetVerboseMode enables or disables verbose mode for error formatting
-func (e *Engine) SetVerboseMode(enabled bool) {
-	e.verboseMode = enabled
-	if enabled {
-		e.Logger.SetLevel(logger.LevelDebug)
-		// Enable console output for verbose mode
-		if loggerService, ok := e.Logger.(*logger.Service); ok {
-			loggerService.SetConsoleOutput(true)
-		}
-		e.Logger.Info("Verbose mode enabled")
-	} else {
-		// Reset to info level when verbose is disabled
-		e.Logger.SetLevel(logger.LevelInfo)
-		// Only disable console output if debug mode is also off
-		if !e.debugMode {
-			if loggerService, ok := e.Logger.(*logger.Service); ok {
-				loggerService.SetConsoleOutput(false)
-			}
-		}
 	}
 }
 
@@ -250,12 +218,9 @@ func (e *Engine) FormatError(err error) string {
 		return ""
 	}
 
-	if e.verboseMode {
-		// When verbose, show full tracked error with details
+	if e.debugMode {
+		// When debug is enabled, show full tracked error with details
 		return errors.FormatCLIDebug(err)
-	} else if e.debugMode {
-		// When debug, show more error details but not full trace
-		return errors.FormatCLI(err)
 	} else {
 		// Default simple format
 		return errors.FormatCLISimple(err)

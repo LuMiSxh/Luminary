@@ -170,8 +170,11 @@ func (b *ErrorBuilder) AsPanic() *ErrorBuilder {
 
 // Error returns the tracked error
 func (b *ErrorBuilder) Error() error {
-	if b == nil || b.err == nil {
-		return nil
+	if b == nil {
+		return fmt.Errorf("nil error builder")
+	}
+	if b.err == nil {
+		return fmt.Errorf("unknown error occurred (builder error is nil)")
 	}
 	return b.err
 }

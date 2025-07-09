@@ -18,40 +18,37 @@ package cli
 
 import (
 	"Luminary/pkg/engine"
+	"context"
 	"fmt"
-	"github.com/urfave/cli/v2"
+	"github.com/urfave/cli/v3"
+	"net/mail"
 	"os"
 )
 
 // NewApp creates a new CLI application
-func NewApp(engine *engine.Engine, version string) *cli.App {
-	app := &cli.App{
-		Name:    "luminary",
-		Usage:   "A streamlined CLI tool for searching and downloading manga",
-		Version: version,
+func NewApp(engine *engine.Engine, version string) *cli.Command {
+	app := &cli.Command{
+		Name:                  "luminary",
+		Usage:                 "A streamlined CLI tool for searching and downloading manga",
+		EnableShellCompletion: true,
+		Version:               version,
+		Authors: []any{
+			mail.Address{Name: "LuMiSxh", Address: "b71f1f@icloud.com"},
+		},
 		Flags: []cli.Flag{
 			&cli.BoolFlag{
 				Name:    "debug",
 				Aliases: []string{"d"},
 				Usage:   "Enable debug output",
 			},
-			&cli.BoolFlag{
-				Name:    "verbose",
-				Aliases: []string{"vb"},
-				Usage:   "Enable verbose output",
-			},
 		},
-		Before: func(c *cli.Context) error {
-			// Set error formatting modes based on flags
-			fmt.Printf("Args: %v\n", c.Args().Slice())
-			fmt.Printf("Flags: %v\n", c.FlagNames())
-
-			if c.Bool("debug") {
+		Before: func(ctx context.Context, cmd *cli.Command) (context.Context, error) {
+			// Set error formatting mode
+			if cmd.Bool("debug") {
 				engine.SetDebugMode(true)
-			} else if c.Bool("verbose") {
-				engine.SetVerboseMode(true)
 			}
-			return nil
+
+			return ctx, nil
 		},
 		Commands: []*cli.Command{
 			{
@@ -130,13 +127,9 @@ func NewApp(engine *engine.Engine, version string) *cli.App {
 				Action:  NewProvidersCommand(engine),
 			},
 		},
-		ExitErrHandler: func(c *cli.Context, err error) {
+		ExitErrHandler: func(ctx context.Context, cmd *cli.Command, err error) {
 			if err != nil {
-				_, err := fmt.Fprintln(os.Stderr, engine.FormatError(err))
-				if err != nil {
-					return
-				}
-				os.Exit(1)
+				_, err = fmt.Fprintln(os.Stderr, engine.FormatError(err))
 			}
 		},
 	}

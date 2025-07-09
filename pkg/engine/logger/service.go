@@ -49,27 +49,25 @@ type Logger interface {
 
 // Service implements the Logger interface
 type Service struct {
-	level         Level
-	logFile       string
-	file          *os.File
-	logger        *log.Logger
-	mu            sync.Mutex
-	colorize      bool
-	pid           int
-	consoleOutput bool
+	level    Level
+	logFile  string
+	file     *os.File
+	logger   *log.Logger
+	mu       sync.Mutex
+	colorize bool
+	pid      int
 }
 
 // NewService creates a new logger service
 func NewService(logFile string) *Service {
 	s := &Service{
-		level:         LevelInfo,
-		logFile:       logFile,
-		colorize:      true,
-		pid:           os.Getpid(),
-		consoleOutput: false, // Default to no console output
+		level:    LevelInfo,
+		logFile:  logFile,
+		colorize: false, // No colorization needed since we don't output to console
+		pid:      os.Getpid(),
 	}
 
-	// Setup initial output (file only by default)
+	// Setup initial output (file only)
 	s.updateOutputWriters()
 
 	return s
@@ -80,7 +78,7 @@ func (s *Service) updateOutputWriters() {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	var output io.Writer
+	var output = io.Discard // Default to discarding logs if no file is available
 
 	// Always try to open log file if specified
 	if s.logFile != "" && s.file == nil {
@@ -90,36 +88,21 @@ func (s *Service) updateOutputWriters() {
 			// Open log file
 			if file, err := os.OpenFile(s.logFile, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0644); err == nil {
 				s.file = file
+				output = file
 			}
 		}
-	}
-
-	// Set output based on configuration
-	if s.consoleOutput {
-		if s.file != nil {
-			output = io.MultiWriter(os.Stdout, s.file)
-		} else {
-			output = os.Stdout
-		}
-	} else {
-		if s.file != nil {
-			output = s.file
-		} else {
-			// Fallback to stdout if no file is available
-			output = os.Stdout
-		}
+	} else if s.file != nil {
+		output = s.file
 	}
 
 	// Create logger with empty flags since we handle formatting ourselves
 	s.logger = log.New(output, "", 0)
 }
 
-// SetConsoleOutput enables or disables console output
+// SetConsoleOutput is a no-op method kept for compatibility
+// It no longer affects logging behavior as console output is permanently disabled
 func (s *Service) SetConsoleOutput(enabled bool) {
-	if s.consoleOutput != enabled {
-		s.consoleOutput = enabled
-		s.updateOutputWriters()
-	}
+	// No-op - console output is permanently disabled
 }
 
 // SetLevel sets the minimum log level
@@ -200,15 +183,8 @@ func (s *Service) log(level Level, format string, args ...interface{}) {
 	logEntry := fmt.Sprintf("%s [%d] %-5s - %s - %s",
 		timestamp, s.pid, levelStr, paddedFileInfo, message)
 
-	// Output with or without color
-	if s.colorize && s.file == nil {
-		// Color output for console
-		color := s.levelColor(level)
-		s.logger.Printf("%s%s%s", color, logEntry, resetColor)
-	} else {
-		// Plain output for file
-		s.logger.Print(logEntry)
-	}
+	// Always use plain output (no colors needed as we only write to file)
+	s.logger.Print(logEntry)
 }
 
 // levelString returns the string representation of a level
@@ -224,31 +200,6 @@ func (s *Service) levelString(level Level) string {
 		return "ERROR"
 	default:
 		return "UNKNOWN"
-	}
-}
-
-// ANSI color codes
-const (
-	resetColor  = "\033[0m"
-	redColor    = "\033[31m"
-	yellowColor = "\033[33m"
-	blueColor   = "\033[34m"
-	grayColor   = "\033[90m"
-)
-
-// levelColor returns the ANSI color code for a level
-func (s *Service) levelColor(level Level) string {
-	switch level {
-	case LevelDebug:
-		return grayColor
-	case LevelInfo:
-		return blueColor
-	case LevelWarn:
-		return yellowColor
-	case LevelError:
-		return redColor
-	default:
-		return resetColor
 	}
 }
 

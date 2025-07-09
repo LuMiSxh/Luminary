@@ -26,7 +26,7 @@ import (
 	"time"
 
 	"github.com/fatih/color"
-	"github.com/urfave/cli/v2"
+	"github.com/urfave/cli/v3"
 )
 
 // Color styles for consistent UI
@@ -56,7 +56,7 @@ var (
 
 // NewSearchCommand creates the search command
 func NewSearchCommand(eng *engine.Engine) cli.ActionFunc {
-	return func(c *cli.Context) error {
+	return func(ctx context.Context, c *cli.Command) error {
 		if c.NArg() == 0 {
 			return errors.New("search query is required").Error()
 		}
@@ -65,7 +65,6 @@ func NewSearchCommand(eng *engine.Engine) cli.ActionFunc {
 		provider := c.String("provider")
 		limit := c.Int("limit")
 
-		// Parse additional options from README examples
 		fields := c.String("fields")
 		filter := c.String("filter")
 		sort := c.String("sort")
@@ -73,7 +72,6 @@ func NewSearchCommand(eng *engine.Engine) cli.ActionFunc {
 		eng.Logger.Debug("Search parameters: query=%s, provider=%s, limit=%d, fields=%s, filter=%s, sort=%s",
 			query, provider, limit, fields, filter, sort)
 
-		ctx := context.Background()
 		options := core.SearchOptions{
 			Query: query,
 			Limit: limit,
@@ -90,7 +88,8 @@ func NewSearchCommand(eng *engine.Engine) cli.ActionFunc {
 		if filter != "" {
 			// Simple parsing for filter string
 			eng.Logger.Debug("Filter string: %s", filter)
-			// Future: Implement filter parsing
+			// TODO: Implement filter parsing and add it to core.SearchOptions.Filters
+			//	The Filters are also not really used in the core.SearchOptions struct so we have to implement that as well
 		}
 
 		// Add sort if specified
@@ -123,9 +122,8 @@ func NewSearchCommand(eng *engine.Engine) cli.ActionFunc {
 			for _, p := range eng.AllProviders() {
 				results, err := p.Search(ctx, query, options)
 				if err != nil {
-					// Just log errors from individual providers rather than failing
-					fmt.Println(eng.FormatError(err))
-					continue
+					// Return immediately on first error instead of continuing
+					return err
 				}
 
 				printSearchResults(p.Name(), results)
@@ -138,7 +136,7 @@ func NewSearchCommand(eng *engine.Engine) cli.ActionFunc {
 
 // NewInfoCommand creates the info command
 func NewInfoCommand(eng *engine.Engine) cli.ActionFunc {
-	return func(c *cli.Context) error {
+	return func(ctx context.Context, c *cli.Command) error {
 		if c.NArg() == 0 {
 			return errors.New("manga ID is required").Error()
 		}
@@ -163,7 +161,6 @@ func NewInfoCommand(eng *engine.Engine) cli.ActionFunc {
 		}
 
 		// Get manga info
-		ctx := context.Background()
 		eng.Logger.Debug("Fetching manga info from provider: %s, id: %s", providerID, id)
 		info, err := provider.GetManga(ctx, id)
 		if err != nil {
@@ -257,7 +254,7 @@ func NewInfoCommand(eng *engine.Engine) cli.ActionFunc {
 
 // NewDownloadCommand creates the download command
 func NewDownloadCommand(eng *engine.Engine) cli.ActionFunc {
-	return func(c *cli.Context) error {
+	return func(ctx context.Context, c *cli.Command) error {
 		if c.NArg() == 0 {
 			return errors.New("chapter ID is required").Error()
 		}
@@ -271,7 +268,6 @@ func NewDownloadCommand(eng *engine.Engine) cli.ActionFunc {
 		eng.Logger.Debug("Download request: chapters=%v, output=%s, format=%s, concurrent=%d",
 			chapterIDs, outputDir, format, concurrent)
 
-		ctx := context.Background()
 		start := time.Now()
 
 		hasErrors := false
@@ -348,7 +344,7 @@ func NewDownloadCommand(eng *engine.Engine) cli.ActionFunc {
 
 // NewProvidersCommand creates the providers command
 func NewProvidersCommand(eng *engine.Engine) cli.ActionFunc {
-	return func(c *cli.Context) error {
+	return func(ctx context.Context, c *cli.Command) error {
 		providers := eng.AllProviders()
 		eng.Logger.Debug("Listing %d providers", len(providers))
 
