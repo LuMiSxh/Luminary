@@ -18,59 +18,61 @@ package errors
 
 import (
 	"errors"
+	"fmt"
 	"runtime"
 	"strings"
 	"time"
 )
 
-// TrackedError wraps errors with automatic function call chain tracking
-type TrackedError struct {
-	Original    error                  `json:"original_error"`
-	RootCause   error                  `json:"root_cause"`
-	CallChain   []FunctionCall         `json:"call_chain"`
-	Context     map[string]interface{} `json:"context,omitempty"`
-	UserMessage string                 `json:"user_message,omitempty"`
-	Category    ErrorCategory          `json:"category"`
-	StackTrace  []StackFrame           `json:"stack_trace,omitempty"`
-}
-
-// FunctionCall represents a single function in the call chain
-type FunctionCall struct {
-	Function  string                 `json:"function"`
-	ShortName string                 `json:"short_name"`
-	Package   string                 `json:"package"`
-	File      string                 `json:"file"`
-	Line      int                    `json:"line"`
-	Timestamp time.Time              `json:"timestamp"`
-	Context   map[string]interface{} `json:"context,omitempty"`
-	Operation string                 `json:"operation,omitempty"`
-}
-
-// StackFrame represents a single frame in the stack trace
-type StackFrame struct {
-	Function string `json:"function"`
-	File     string `json:"file"`
-	Line     int    `json:"line"`
-}
-
-// ErrorCategory helps classify different types of errors
+// ErrorCategory represents the type of error
 type ErrorCategory string
 
 const (
+	CategoryUnknown    ErrorCategory = "unknown"
 	CategoryNetwork    ErrorCategory = "network"
+	CategoryParser     ErrorCategory = "parser"
 	CategoryProvider   ErrorCategory = "provider"
-	CategoryParsing    ErrorCategory = "parsing"
-	CategoryValidation ErrorCategory = "validation"
 	CategoryTimeout    ErrorCategory = "timeout"
-	CategoryAuth       ErrorCategory = "authentication"
-	CategoryRateLimit  ErrorCategory = "rate_limit"
 	CategoryNotFound   ErrorCategory = "not_found"
+	CategoryAuth       ErrorCategory = "auth"
+	CategoryRateLimit  ErrorCategory = "rate_limit"
 	CategoryFileSystem ErrorCategory = "filesystem"
 	CategoryDownload   ErrorCategory = "download"
 	CategoryPanic      ErrorCategory = "panic"
-	CategoryUnknown    ErrorCategory = "unknown"
 )
 
+// TrackedError wraps an error with additional context
+type TrackedError struct {
+	Original    error
+	RootCause   error
+	UserMessage string
+	Category    ErrorCategory
+	CallChain   []FunctionCall
+	Context     map[string]interface{}
+	StackTrace  []StackFrame
+	Timestamp   time.Time
+}
+
+// FunctionCall represents a function in the call chain
+type FunctionCall struct {
+	Function  string
+	ShortName string
+	Package   string
+	File      string
+	Line      int
+	Operation string
+	Context   map[string]interface{}
+	Timestamp time.Time
+}
+
+// StackFrame represents a stack frame
+type StackFrame struct {
+	Function string
+	File     string
+	Line     int
+}
+
+// Error implements the error interface
 func (e *TrackedError) Error() string {
 	if e.UserMessage != "" {
 		return e.UserMessage
@@ -81,31 +83,36 @@ func (e *TrackedError) Error() string {
 	return "unknown error"
 }
 
+// Unwrap returns the original error
 func (e *TrackedError) Unwrap() error {
 	return e.Original
 }
 
+// Is implements errors.Is support
 func (e *TrackedError) Is(target error) bool {
-	return (e.Original != nil && Is(e.Original, target)) ||
-		(e.RootCause != nil && Is(e.RootCause, target))
+	return errors.Is(e.Original, target) || errors.Is(e.RootCause, target)
 }
 
-// GetOriginal returns the original error that started this chain
-func (e *TrackedError) GetOriginal() error {
-	return e.Original
+// As implements errors.As support
+func (e *TrackedError) As(target interface{}) bool {
+	if t, ok := target.(**TrackedError); ok {
+		*t = e
+		return true
+	}
+	return errors.As(e.Original, &target)
 }
 
-// GetRootCause returns the deepest error in the chain
-func (e *TrackedError) GetRootCause() error {
-	return e.RootCause
+// GetContext returns the error context
+func (e *TrackedError) GetContext() map[string]interface{} {
+	return e.Context
 }
 
-// GetChain returns the full function call chain
-func (e *TrackedError) GetChain() []FunctionCall {
-	return e.CallChain
+// GetCategory returns the error category
+func (e *TrackedError) GetCategory() string {
+	return string(e.Category)
 }
 
-// GetFunctionChain returns the function call path as a string
+// GetFunctionChain returns the function call chain as a string
 func (e *TrackedError) GetFunctionChain() string {
 	if len(e.CallChain) == 0 {
 		return ""
@@ -119,176 +126,96 @@ func (e *TrackedError) GetFunctionChain() string {
 	return strings.Join(functions, " → ")
 }
 
-// GetCategory returns the error classification
-func (e *TrackedError) GetCategory() ErrorCategory {
-	return e.Category
+// GetChain returns the call chain details
+func (e *TrackedError) GetChain() []FunctionCall {
+	return e.CallChain
 }
 
-// IsCategory checks if error belongs to a specific category
-func (e *TrackedError) IsCategory(category ErrorCategory) bool {
-	return e.Category == category
+// GetOriginal returns the original error
+func (e *TrackedError) GetOriginal() error {
+	return e.Original
 }
 
-// GetLastFunction returns the most recent function in the chain
-func (e *TrackedError) GetLastFunction() *FunctionCall {
-	if len(e.CallChain) == 0 {
-		return nil
-	}
-	return &e.CallChain[len(e.CallChain)-1]
+// GetRootCause returns the root cause error
+func (e *TrackedError) GetRootCause() error {
+	return e.RootCause
 }
 
-// GetFirstFunction returns the first function in the chain
-func (e *TrackedError) GetFirstFunction() *FunctionCall {
-	if len(e.CallChain) == 0 {
-		return nil
-	}
-	return &e.CallChain[0]
-}
-
-// GetContext returns the context data associated with the error
-func (e *TrackedError) GetContext() map[string]interface{} {
-	if e.Context == nil {
-		return make(map[string]interface{})
-	}
-	return e.Context
-}
-
-// Track automatically wraps an error with function call tracking
-func Track(err error, context ...map[string]interface{}) error {
+// trackError creates a new tracked error
+func trackError(err error, context ...map[string]interface{}) *TrackedError {
 	if err == nil {
 		return nil
 	}
 
-	pc, file, line, ok := getCaller()
-	if !ok {
-		return createFallbackError(err, context...)
+	// If already tracked, return as is
+	var tracked *TrackedError
+	if As(err, &tracked) {
+		// Add new function to call chain
+		pc, file, line, _ := runtime.Caller(2)
+		fn := runtime.FuncForPC(pc)
+		if fn == nil { // Add nil check for fn
+			return tracked
+		}
+
+		call := FunctionCall{
+			Function:  fn.Name(),
+			ShortName: extractShortName(fn.Name()),
+			Package:   extractPackageName(fn.Name()),
+			File:      extractFileName(file),
+			Line:      line,
+			Timestamp: time.Now(),
+		}
+
+		if len(context) > 0 && context[0] != nil { // Add nil check for context
+			call.Context = context[0]
+		}
+
+		tracked.CallChain = append(tracked.CallChain, call)
+		return tracked
 	}
 
+	// Create new tracked error
+	te := &TrackedError{
+		Original:   err,
+		RootCause:  findRootCause(err),
+		Category:   classifyError(err),
+		Context:    make(map[string]interface{}),
+		Timestamp:  time.Now(),
+		StackTrace: captureStackTrace(),
+	}
+
+	// Add initial function to call chain
+	pc, file, line, _ := runtime.Caller(2)
 	fn := runtime.FuncForPC(pc)
-	if fn == nil {
-		return createFallbackError(err, context...)
+	if fn == nil { // Add nil check for fn
+		return te
 	}
 
-	fullFuncName := fn.Name()
-	functionCall := FunctionCall{
-		Function:  fullFuncName,
-		ShortName: extractShortFunctionName(fullFuncName),
-		Package:   extractPackageName(fullFuncName),
+	call := FunctionCall{
+		Function:  fn.Name(),
+		ShortName: extractShortName(fn.Name()),
+		Package:   extractPackageName(fn.Name()),
 		File:      extractFileName(file),
 		Line:      line,
 		Timestamp: time.Now(),
-		Operation: detectOperation(extractShortFunctionName(fullFuncName)),
 	}
 
-	// Merge context if provided
-	if len(context) > 0 {
-		functionCall.Context = context[0]
-	}
-
-	// If already a TrackedError, add to chain but preserve the original category
-	var trackedErr *TrackedError
-	if errors.As(err, &trackedErr) {
-		trackedErr.CallChain = append(trackedErr.CallChain, functionCall)
-		return trackedErr
-	}
-
-	// Create new TrackedError
-	return &TrackedError{
-		Original:   err,
-		RootCause:  findRootCause(err),
-		CallChain:  []FunctionCall{functionCall},
-		Context:    make(map[string]interface{}),
-		Category:   classifyError(err),
-		StackTrace: captureStackTrace(),
-	}
-}
-
-// getCaller walks up the stack to find the first non-tracking function
-func getCaller() (uintptr, string, int, bool) {
-	internalPatterns := []string{
-		"pkg/errors/tracker.go",
-		"pkg/errors/simple.go",
-		"pkg/errors/coverage.go",
-	}
-
-	for i := 1; i < 10; i++ {
-		pc, file, line, ok := runtime.Caller(i)
-		if !ok {
-			break
-		}
-
-		isInternal := false
-		for _, pattern := range internalPatterns {
-			if strings.Contains(file, pattern) {
-				isInternal = true
-				break
-			}
-		}
-
-		if !isInternal {
-			return pc, file, line, true
-		}
-	}
-
-	return runtime.Caller(1)
-}
-
-// TrackWithMessage wraps an error with a user-friendly message
-func TrackWithMessage(err error, userMessage string, context ...map[string]interface{}) error {
-	trackedErr := Track(err, context...)
-	var te *TrackedError
-	if errors.As(trackedErr, &te) {
-		te.UserMessage = userMessage
-	}
-	return trackedErr
-}
-
-// TrackWithContext wraps an error and adds context data
-func TrackWithContext(err error, contextData map[string]interface{}) error {
-	trackedErr := Track(err, contextData)
-	var te *TrackedError
-	if errors.As(trackedErr, &te) {
-		for k, v := range contextData {
+	if len(context) > 0 && context[0] != nil { // Add nil check for context
+		call.Context = context[0]
+		// Also add to main context
+		for k, v := range context[0] {
 			te.Context[k] = v
 		}
 	}
-	return trackedErr
-}
 
-// TrackNetwork marks an error as network-related
-func TrackNetwork(err error, context ...map[string]interface{}) error {
-	trackedErr := Track(err, context...)
+	te.CallChain = []FunctionCall{call}
 
-	var te *TrackedError
-	if errors.As(trackedErr, &te) && te.Category == CategoryUnknown {
-		te.Category = CategoryNetwork
-	}
-
-	return trackedErr
-}
-
-// TrackProvider marks an error as provider-related
-func TrackProvider(err error, providerID string, context ...map[string]interface{}) error {
-	ctx := map[string]interface{}{"provider_id": providerID}
-	if len(context) > 0 {
-		for k, v := range context[0] {
-			ctx[k] = v
-		}
-	}
-
-	trackedErr := Track(err, ctx)
-
-	var te *TrackedError
-	if errors.As(trackedErr, &te) && te.Category == CategoryUnknown {
-		te.Category = CategoryProvider
-	}
-
-	return trackedErr
+	return te
 }
 
 // Helper functions
 
-func extractShortFunctionName(fullName string) string {
+func extractShortName(fullName string) string {
 	idx := strings.LastIndex(fullName, ".")
 	if idx == -1 {
 		return fullName
@@ -296,7 +223,7 @@ func extractShortFunctionName(fullName string) string {
 
 	shortName := fullName[idx+1:]
 
-	// Handle method calls like "(*SearchService).Search"
+	// Handle method calls like "(*Provider).Search"
 	if strings.Contains(fullName, "(*") && strings.Contains(fullName, ")") {
 		start := strings.LastIndex(fullName, "(*")
 		end := strings.Index(fullName[start:], ").")
@@ -315,44 +242,29 @@ func extractPackageName(fullName string) string {
 		return "unknown"
 	}
 
+	// Remove the function name
 	packageParts := parts[:len(parts)-1]
-	packageName := strings.Join(packageParts, ".")
-
-	if idx := strings.LastIndex(packageName, "/"); idx != -1 {
-		return packageName[idx+1:]
-	}
-
-	return packageName
+	return strings.Join(packageParts, ".")
 }
 
-func extractFileName(fullPath string) string {
-	if idx := strings.LastIndex(fullPath, "/"); idx != -1 {
-		return fullPath[idx+1:]
+func extractFileName(path string) string {
+	idx := strings.LastIndex(path, "/")
+	if idx == -1 {
+		return path
 	}
-	return fullPath
+	return path[idx+1:]
 }
 
-func detectOperation(functionName string) string {
-	lower := strings.ToLower(functionName)
-
-	switch {
-	case strings.Contains(lower, "search"):
-		return "search"
-	case strings.Contains(lower, "download"):
-		return "download"
-	case strings.Contains(lower, "get"), strings.Contains(lower, "fetch"):
-		return "get"
-	case strings.Contains(lower, "parse"):
-		return "parse"
-	case strings.Contains(lower, "validate"):
-		return "validate"
-	case strings.Contains(lower, "http"), strings.Contains(lower, "request"):
-		return "http_request"
-	case strings.Contains(lower, "auth"):
-		return "authentication"
-	default:
-		return ""
+func findRootCause(err error) error {
+	root := err
+	for {
+		unwrapped := errors.Unwrap(root)
+		if unwrapped == nil {
+			break
+		}
+		root = unwrapped
 	}
+	return root
 }
 
 func classifyError(err error) ErrorCategory {
@@ -362,93 +274,64 @@ func classifyError(err error) ErrorCategory {
 
 	errStr := strings.ToLower(err.Error())
 
-	switch {
-	case isNetworkError(errStr):
+	// Network errors
+	if strings.Contains(errStr, "dial tcp") ||
+		strings.Contains(errStr, "connection refused") ||
+		strings.Contains(errStr, "no such host") ||
+		strings.Contains(errStr, "network") {
 		return CategoryNetwork
-	case isParsingError(errStr):
-		return CategoryParsing
-	case isTimeoutError(errStr):
+	}
+
+	// Timeout errors
+	if strings.Contains(errStr, "timeout") ||
+		strings.Contains(errStr, "deadline exceeded") {
 		return CategoryTimeout
-	case isAuthError(errStr):
-		return CategoryAuth
-	case isNotFoundError(errStr):
+	}
+
+	// Not found errors
+	if strings.Contains(errStr, "not found") ||
+		strings.Contains(errStr, "404") {
 		return CategoryNotFound
-	case isRateLimitError(errStr):
+	}
+
+	// Auth errors
+	if strings.Contains(errStr, "unauthorized") ||
+		strings.Contains(errStr, "forbidden") ||
+		strings.Contains(errStr, "401") ||
+		strings.Contains(errStr, "403") {
+		return CategoryAuth
+	}
+
+	// Rate limit errors
+	if strings.Contains(errStr, "rate limit") ||
+		strings.Contains(errStr, "too many requests") ||
+		strings.Contains(errStr, "429") {
 		return CategoryRateLimit
-	case isFileSystemError(errStr):
+	}
+
+	// File system errors
+	if strings.Contains(errStr, "no such file") ||
+		strings.Contains(errStr, "permission denied") ||
+		strings.Contains(errStr, "file exists") {
 		return CategoryFileSystem
-	default:
-		return CategoryUnknown
-	}
-}
-
-func isNetworkError(errStr string) bool {
-	networkPatterns := []string{
-		"dial tcp", "connection refused", "no such host", "network is unreachable",
-		"connection reset", "timeout", "tls", "certificate", "dns", "no route to host",
 	}
 
-	for _, pattern := range networkPatterns {
-		if strings.Contains(errStr, pattern) {
-			return true
-		}
-	}
-	return false
-}
-
-func isParsingError(errStr string) bool {
-	parsingPatterns := []string{
-		"json", "xml", "yaml", "parse", "unmarshal", "invalid character",
-		"unexpected end", "syntax error",
+	// Parser errors
+	if strings.Contains(errStr, "json") ||
+		strings.Contains(errStr, "xml") ||
+		strings.Contains(errStr, "parse") ||
+		strings.Contains(errStr, "unmarshal") {
+		return CategoryParser
 	}
 
-	for _, pattern := range parsingPatterns {
-		if strings.Contains(errStr, pattern) {
-			return true
-		}
-	}
-	return false
-}
-
-func isTimeoutError(errStr string) bool {
-	return strings.Contains(errStr, "timeout") || strings.Contains(errStr, "deadline exceeded")
-}
-
-func isAuthError(errStr string) bool {
-	authPatterns := []string{"unauthorized", "forbidden", "authentication", "invalid token"}
-
-	for _, pattern := range authPatterns {
-		if strings.Contains(errStr, pattern) {
-			return true
-		}
-	}
-	return false
-}
-
-func isNotFoundError(errStr string) bool {
-	return strings.Contains(errStr, "not found") || strings.Contains(errStr, "404")
-}
-
-func isRateLimitError(errStr string) bool {
-	return strings.Contains(errStr, "rate limit") || strings.Contains(errStr, "too many requests")
-}
-
-func isFileSystemError(errStr string) bool {
-	fsPatterns := []string{"no such file", "permission denied", "file exists", "directory"}
-
-	for _, pattern := range fsPatterns {
-		if strings.Contains(errStr, pattern) {
-			return true
-		}
-	}
-	return false
+	return CategoryUnknown
 }
 
 func captureStackTrace() []StackFrame {
 	var frames []StackFrame
 
-	// Capture up to 20 frames, skipping the first two (this function and getCaller)
-	for i := 2; i < 22; i++ {
+	// Capture up to 10 frames, skipping the first 3 (this function and its callers)
+	for i := 3; i < 13; i++ {
 		pc, file, line, ok := runtime.Caller(i)
 		if !ok {
 			break
@@ -469,38 +352,94 @@ func captureStackTrace() []StackFrame {
 	return frames
 }
 
-func findRootCause(err error) error {
-	root := err
-	for {
-		if unwrapped := Unwrap(root); unwrapped != nil {
-			root = unwrapped
-		} else {
-			break
-		}
-	}
-	return root
+// Public functions for compatibility
+
+// Is reports whether any error in err's chain matches target
+func Is(err, target error) bool {
+	return errors.Is(err, target)
 }
 
-func createFallbackError(err error, context ...map[string]interface{}) error {
-	functionCall := FunctionCall{
-		Function:  "unknown",
-		ShortName: "unknown",
-		Package:   "unknown",
-		File:      "unknown",
-		Line:      0,
-		Timestamp: time.Now(),
+// As finds the first error in err's chain that matches target
+func As(err error, target interface{}) bool {
+	if err == nil {
+		return false
 	}
 
-	if len(context) > 0 {
-		functionCall.Context = context[0]
+	// We do NOT write "&target" here because we want to support both pointer and non-pointer targets
+	//goland:noinspection GoErrorsAs
+	return errors.As(err, target)
+}
+
+// Unwrap returns the result of calling the Unwrap method on err
+func Unwrap(err error) error {
+	return errors.Unwrap(err)
+}
+
+// Join returns an error that wraps the given errors
+func Join(errs ...error) error {
+	// Filter out nil errors
+	var nonNil []error
+	for _, err := range errs {
+		if err != nil {
+			nonNil = append(nonNil, err)
+		}
 	}
 
-	return &TrackedError{
-		Original:   err,
-		RootCause:  findRootCause(err),
-		CallChain:  []FunctionCall{functionCall},
-		Context:    make(map[string]interface{}),
-		Category:   classifyError(err),
-		StackTrace: captureStackTrace(),
+	switch len(nonNil) {
+	case 0:
+		return nil
+	case 1:
+		return Track(nonNil[0]).Error()
 	}
+
+	// Create combined error
+	combinedErr := fmt.Errorf("multiple errors: %d errors occurred", len(nonNil))
+
+	// Track the combined error with proper error handling
+	te := trackError(combinedErr)
+	if te == nil {
+		return combinedErr // Fallback if tracking fails
+	}
+
+	te.Context["error_count"] = len(nonNil)
+	te.Context["errors"] = nonNil
+
+	// Collect call chains from all source errors
+	var allCallChains []FunctionCall
+
+	// First add the current call chain (where Join was called)
+	allCallChains = append(allCallChains, te.CallChain...)
+
+	// Then add call chains from all original errors
+	for _, err := range nonNil {
+		var tracked *TrackedError
+		if err != nil && As(err, &tracked) && tracked != nil {
+			allCallChains = append(allCallChains, tracked.CallChain...)
+		}
+	}
+
+	// Replace the call chain with the merged one
+	te.CallChain = allCallChains
+
+	// Determine predominant category
+	categoryCount := make(map[ErrorCategory]int)
+	for _, err := range nonNil {
+		var tracked *TrackedError
+		if err != nil && As(err, &tracked) && tracked != nil {
+			categoryCount[tracked.Category]++
+		}
+	}
+
+	var maxCategory = CategoryUnknown
+	maxCount := 0
+	for cat, count := range categoryCount {
+		if count > maxCount {
+			maxCategory = cat
+			maxCount = count
+		}
+	}
+
+	te.Category = maxCategory
+
+	return te
 }

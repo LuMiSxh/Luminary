@@ -91,7 +91,7 @@ jobs:
           cp ${{ matrix.binary_path_rpc }} release/
           
           cp README.md release/
-          cp RPC_Doc.md release/
+          cp RPC_DOCUMENTATION.md release/
           cd release
           tar -czf ../luminary-${{ github.event.inputs.version }}-${{ matrix.target }}.tar.gz *
           cd ..
@@ -104,7 +104,7 @@ jobs:
           cp ${{ matrix.binary_path_rpc }} release/
           
           cp README.md release/
-          cp RPC_Doc.md release/
+          cp RPC_DOCUMENTATION.md release/
           cd release
           7z a -tzip ../luminary-${{ github.event.inputs.version }}-${{ matrix.target }}.zip *
           cd ..
@@ -156,4 +156,4 @@ jobs:
             ## Installation
             
             Download the appropriate file for your operating system, extract it, and add the executables (`luminary` and `luminary-rpc`) to your PATH (optional).
-            Refer to `README.md` (included in the archive) for usage details and `RPC_Doc.md` for the JSON-RPC interface.
+            Refer to `README.md` (included in the archive) for usage details and `RPC_DOCUMENTATION.md` for the JSON-RPC interface.

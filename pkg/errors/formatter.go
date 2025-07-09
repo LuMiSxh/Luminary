@@ -22,6 +22,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"math"
 	"strings"
 
 	"github.com/fatih/color"
@@ -405,7 +406,7 @@ func (f *CLIFormatter) formatFunctionChain(trackedErr *TrackedError) string {
 	// Calculate and show total execution time if timestamps are enabled
 	if f.ShowTimestamps && len(trackedErr.CallChain) > 0 {
 		duration := trackedErr.CallChain[len(trackedErr.CallChain)-1].Timestamp.Sub(trackedErr.CallChain[0].Timestamp)
-		parts = append(parts, fmt.Sprintf("  Total time: %s", f.HighlightStyle.Sprintf("%.2fms", float64(duration.Nanoseconds())/1e6)))
+		parts = append(parts, fmt.Sprintf("  Total time: %s", f.HighlightStyle.Sprintf("%.2fms", math.Abs(float64(duration.Nanoseconds())/1e6))))
 	}
 
 	return strings.Join(parts, "\n")
@@ -424,12 +425,12 @@ func (f *CLIFormatter) formatDebugInfo(trackedErr *TrackedError) string {
 			f.DetailValueStyle.Sprint(trackedErr.Original.Error())))
 
 		// Check if this is a joined error (from errors.Join)
-		originalErrors, hasOriginals := trackedErr.Context["original_errors"]
-		if hasOriginals {
+		errorsList, hasErrors := trackedErr.Context["errors"]
+		if hasErrors {
 			parts = append(parts, "")
 			parts = append(parts, f.SubtitleStyle.Sprint("Component Errors:"))
 
-			if errSlice, ok := originalErrors.([]error); ok {
+			if errSlice, ok := errorsList.([]error); ok {
 				for i, componentErr := range errSlice {
 					// Extract the original error message
 					errMessage := componentErr.Error()
@@ -467,9 +468,9 @@ func (f *CLIFormatter) formatDebugInfo(trackedErr *TrackedError) string {
 					}
 				}
 			} else {
-				// Fallback if original_errors is not properly typed
+				// Fallback if errors is not properly typed
 				parts = append(parts, fmt.Sprintf("  %s",
-					f.DetailValueStyle.Sprint(originalErrors)))
+					f.DetailValueStyle.Sprint(errorsList)))
 			}
 		}
 	}
@@ -485,8 +486,8 @@ func (f *CLIFormatter) formatDebugInfo(trackedErr *TrackedError) string {
 		parts = append(parts, "")
 		parts = append(parts, f.SubtitleStyle.Sprint("Global Context:"))
 		for k, v := range trackedErr.Context {
-			// Skip original_errors as we've already displayed it in a better format
-			if k == "original_errors" {
+			// Skip errors as we've already displayed it in a better format
+			if k == "errors" || k == "error_count" {
 				continue
 			}
 
@@ -512,10 +513,18 @@ func (f *CLIFormatter) formatDebugInfo(trackedErr *TrackedError) string {
 	return strings.Join(parts, "\n")
 }
 
+// GetContext extracts the context from a TrackedError or returns nil
+func GetContext(err error) map[string]interface{} {
+	var tracked *TrackedError
+	if errors.As(err, &tracked) {
+		return tracked.Context
+	}
+	return nil
+}
+
 // Helper methods for extracting information
 
 func (f *CLIFormatter) extractProviderID(trackedErr *TrackedError) string {
-	// Use GetContext from simple.go
 	context := GetContext(trackedErr)
 	if context == nil {
 		return ""
@@ -539,7 +548,6 @@ func (f *CLIFormatter) extractProviderID(trackedErr *TrackedError) string {
 }
 
 func (f *CLIFormatter) extractURL(trackedErr *TrackedError) string {
-	// Use GetContext from simple.go
 	context := GetContext(trackedErr)
 	if context == nil {
 		return ""
@@ -596,8 +604,21 @@ func (f *CLIFormatter) extractHTTPInfo(trackedErr *TrackedError) string {
 		return ""
 	}
 
-	// First check the main context
+	// Check for HTTP method directly
 	if method, ok := context["http_method"].(string); ok {
+		info := fmt.Sprintf("%s %s",
+			f.DetailLabelStyle.Sprint("HTTP Method:"),
+			f.DetailValueStyle.Sprint(method))
+
+		if statusCode, ok := context["status_code"].(int); ok && statusCode > 0 {
+			info += fmt.Sprintf(", %s %s",
+				f.DetailLabelStyle.Sprint("Status:"),
+				f.DetailValueStyle.Sprint(statusCode))
+		}
+
+		parts = append(parts, info)
+	} else if method, ok := context["method"].(string); ok {
+		// Alternative keys that might be used
 		info := fmt.Sprintf("%s %s",
 			f.DetailLabelStyle.Sprint("HTTP Method:"),
 			f.DetailValueStyle.Sprint(method))
@@ -612,7 +633,7 @@ func (f *CLIFormatter) extractHTTPInfo(trackedErr *TrackedError) string {
 	} else {
 		// Then check call chain as fallback
 		for _, call := range trackedErr.CallChain {
-			if method, ok := call.Context["http_method"].(string); ok {
+			if method, ok := call.Context["method"].(string); ok {
 				info := fmt.Sprintf("%s %s",
 					f.DetailLabelStyle.Sprint("HTTP Method:"),
 					f.DetailValueStyle.Sprint(method))
@@ -640,7 +661,7 @@ func (f *CLIFormatter) getCategoryPrefix(category ErrorCategory) string {
 		return "[NETWORK]"
 	case CategoryProvider:
 		return "[PROVIDER]"
-	case CategoryParsing:
+	case CategoryParser:
 		return "[PARSING]"
 	case CategoryNotFound:
 		return "[NOT FOUND]"
@@ -668,7 +689,7 @@ func (f *CLIFormatter) getCategoryStyle(category ErrorCategory) *color.Color {
 		return f.NetworkStyle
 	case CategoryProvider:
 		return f.ProviderStyle
-	case CategoryParsing:
+	case CategoryParser:
 		return f.ParsingStyle
 	case CategoryNotFound:
 		return f.NotFoundStyle
@@ -702,11 +723,6 @@ var (
 )
 
 // Convenience functions
-
-// FormatCLI formats an error for CLI display using the default formatter
-func FormatCLI(err error) string {
-	return DefaultCLIFormatter.Format(err)
-}
 
 // FormatCLISimple formats an error for simple CLI display
 func FormatCLISimple(err error) string {

@@ -17,125 +17,137 @@
 package network
 
 import (
-	"Luminary/pkg/engine/logger"
-	"Luminary/pkg/errors"
 	"context"
-	"encoding/json"
 	"fmt"
 	"io"
 	"net/http"
-	"net/url"
 	"time"
+
+	"Luminary/pkg/engine/logger"
+	"Luminary/pkg/errors"
 )
 
-type HTTPService struct {
-	DefaultClient      *http.Client
-	RequestOptions     RequestOptions
-	DefaultRetries     int
-	DefaultTimeout     time.Duration
-	ThrottleTimeAPI    time.Duration
-	ThrottleTimeImages time.Duration
-	Logger             *logger.Service
+// Client provides unified HTTP operations with rate limiting and retries
+type Client struct {
+	http    *http.Client
+	limiter *RateLimiter
+	logger  logger.Logger
+
+	// Default settings
+	defaultRetries int
+	defaultTimeout time.Duration
+	defaultHeaders map[string]string
 }
 
-type RequestOptions struct {
-	Headers         http.Header
-	UserProvider    string
-	Cookies         []*http.Cookie
-	Referer         string
-	Method          string
-	FollowRedirects bool
+// NewClient creates a new network client
+func NewClient(logger logger.Logger) *Client {
+	return &Client{
+		http: &http.Client{
+			Timeout: 30 * time.Second,
+			Transport: &http.Transport{
+				MaxIdleConns:        100,
+				MaxIdleConnsPerHost: 20,
+				IdleConnTimeout:     90 * time.Second,
+				DisableCompression:  false,
+			},
+		},
+		limiter:        NewRateLimiter(),
+		logger:         logger,
+		defaultRetries: 3,
+		defaultTimeout: 30 * time.Second,
+		defaultHeaders: map[string]string{
+			"User-Agent": "Luminary/1.0",
+			"Accept":     "text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8",
+		},
+	}
 }
 
-// ExtractDomain extracts the domain from a URL
-func ExtractDomain(urlStr string) string {
-	parsed, err := url.Parse(urlStr)
-	if err != nil {
-		// If parsing fails, return the whole URL as the domain
-		return urlStr
+// Do execute an HTTP request with rate limiting and retries
+func (c *Client) Do(ctx context.Context, req *Request) (*Response, error) {
+	// Apply rate limiting
+	if req.RateLimit > 0 {
+		if err := c.limiter.Wait(ctx, req.URL, req.RateLimit); err != nil {
+			return nil, errors.Track(err).
+				WithContext("url", req.URL).
+				AsNetwork().
+				Error()
+		}
 	}
-	return parsed.Host
+
+	// Set defaults
+	if req.Method == "" {
+		req.Method = "GET"
+	}
+	if req.Timeout == 0 {
+		req.Timeout = c.defaultTimeout
+	}
+	if req.MaxRetries == 0 {
+		req.MaxRetries = c.defaultRetries
+	}
+
+	// Execute with retries
+	return c.executeWithRetry(ctx, req)
 }
 
-// FetchWithRetries performs an HTTP request with retry logic
-func (h *HTTPService) FetchWithRetries(ctx context.Context, url string, headers http.Header) (*http.Response, error) {
-	// Determine the method to use
-	method := h.RequestOptions.Method
-	if method == "" {
-		method = "GET" // Default to GET if not specified
-	}
+// Request is a convenience method for simple requests
+func (c *Client) Request(ctx context.Context, req *Request) (*Response, error) {
+	return c.Do(ctx, req)
+}
 
-	req, err := http.NewRequestWithContext(ctx, method, url, nil)
-	if err != nil {
-		return nil, errors.TN(err)
-	}
+// Get performs a GET request
+func (c *Client) Get(ctx context.Context, url string) (*Response, error) {
+	return c.Do(ctx, &Request{
+		URL:    url,
+		Method: "GET",
+	})
+}
 
-	// Apply default headers
-	for k, v := range h.RequestOptions.Headers {
-		req.Header[k] = v
-	}
+// Post performs a POST request
+func (c *Client) Post(ctx context.Context, url string, body io.Reader) (*Response, error) {
+	return c.Do(ctx, &Request{
+		URL:    url,
+		Method: "POST",
+		Body:   body,
+	})
+}
 
-	// Apply additional headers
-	for k, v := range headers {
-		req.Header[k] = v
-	}
-
-	// Set user provider if not already set
-	if _, ok := req.Header["User-Provider"]; !ok && h.RequestOptions.UserProvider != "" {
-		req.Header.Set("User-Provider", h.RequestOptions.UserProvider)
-	}
-
-	// Apply cookies if any
-	for _, cookie := range h.RequestOptions.Cookies {
-		req.AddCookie(cookie)
-	}
-
-	// Set referer if specified
-	if h.RequestOptions.Referer != "" {
-		req.Header.Set("Referer", h.RequestOptions.Referer)
-	}
-
-	// Log the request details if logger is available
-	if h.Logger != nil {
-		h.Logger.Debug("[HTTP] %s request to %s", req.Method, req.URL.String())
-	}
-
-	// Perform request with retries
-	var resp *http.Response
+// executeWithRetry executes a request with retry logic
+func (c *Client) executeWithRetry(ctx context.Context, req *Request) (*Response, error) {
 	var allErrors []error // Collect all errors during retries
 
-	for attempt := 0; attempt <= h.DefaultRetries; attempt++ {
-		resp, err = h.DefaultClient.Do(req)
+	for attempt := 0; attempt <= req.MaxRetries; attempt++ {
+		resp, err := c.executeRequest(ctx, req)
 
 		// Log response details
-		if h.Logger != nil {
-			if err != nil {
-				h.Logger.Debug("[HTTP] Request failed (attempt %d/%d): %v", attempt+1, h.DefaultRetries+1, err)
-				// Add attempt context to the error
-				allErrors = append(allErrors, errors.TM(err, fmt.Sprintf("attempt %d/%d failed", attempt+1, h.DefaultRetries+1)))
-			} else {
-				h.Logger.Debug("[HTTP] Response received (attempt %d/%d): status %d", attempt+1, h.DefaultRetries+1, resp.StatusCode)
-			}
+		if err != nil {
+			c.logger.Debug("[HTTP] Request failed (attempt %d/%d): %v", attempt+1, req.MaxRetries+1, err)
+			// Add attempt context to the error
+			attemptErr := errors.Track(err).
+				WithMessage(fmt.Sprintf("attempt %d/%d failed", attempt+1, req.MaxRetries+1)).
+				AsNetwork().Error()
+			allErrors = append(allErrors, attemptErr)
+		} else if resp != nil {
+			c.logger.Debug("[HTTP] Response received (attempt %d/%d): status %d", attempt+1, req.MaxRetries+1, resp.StatusCode)
 		}
 
 		// Network or connection error - retry
-		if err != nil {
-			if attempt < h.DefaultRetries {
+		if err != nil || resp == nil {
+			if attempt < req.MaxRetries {
 				// Exponential backoff
 				backoff := time.Duration(1<<uint(attempt)) * time.Second
 				if backoff > 30*time.Second {
 					backoff = 30 * time.Second
 				}
 
-				if h.Logger != nil {
-					h.Logger.Debug("[HTTP] Retrying in %v...", backoff)
-				}
+				c.logger.Debug("[HTTP] Retrying in %v...", backoff)
 
 				select {
 				case <-ctx.Done():
-					ctxErr := errors.TM(ctx.Err(), "request canceled by context")
+					ctxErr := errors.Track(ctx.Err()).
+						WithMessage("request canceled by context").
+						AsNetwork().Error()
 					allErrors = append(allErrors, ctxErr)
-					return nil, errors.TN(errors.Join(allErrors...))
+					return nil, errors.Join(allErrors...)
 				case <-time.After(backoff):
 					// Continue with retry
 				}
@@ -143,42 +155,33 @@ func (h *HTTPService) FetchWithRetries(ctx context.Context, url string, headers 
 			continue
 		}
 
+		// At this point, we know resp is not nil
+
 		// Check status code - retry only for 5xx server errors
 		if resp.StatusCode >= 500 {
-			// Read the error response body for debugging
-			bodyBytes, _ := io.ReadAll(resp.Body)
-			_ = resp.Body.Close()
-
-			errorBody := ""
-			if len(bodyBytes) > 0 {
-				errorBody = string(bodyBytes)
-				if h.Logger != nil {
-					h.Logger.Debug("[HTTP] Server error response body: %s", errorBody)
-				}
-			}
-
 			// Create a server error and add it to the list
-			serverErr := errors.TM(
+			serverErr := errors.Track(
 				fmt.Errorf("server returned %d status code", resp.StatusCode),
-				fmt.Sprintf("attempt %d/%d: server error %d", attempt+1, h.DefaultRetries+1, resp.StatusCode),
-			)
+			).WithMessage(
+				fmt.Sprintf("attempt %d/%d: server error %d", attempt+1, req.MaxRetries+1, resp.StatusCode),
+			).AsNetwork().Error()
 			allErrors = append(allErrors, serverErr)
 
-			if attempt < h.DefaultRetries {
+			if attempt < req.MaxRetries {
 				// Exponential backoff
 				backoff := time.Duration(1<<uint(attempt)) * time.Second
 				if backoff > 30*time.Second {
 					backoff = 30 * time.Second
 				}
 
-				if h.Logger != nil {
-					h.Logger.Debug("[HTTP] Server error %d, retrying in %v...", resp.StatusCode, backoff)
-				}
+				c.logger.Debug("[HTTP] Server error %d, retrying in %v...", resp.StatusCode, backoff)
 
 				select {
 				case <-ctx.Done():
-					allErrors = append(allErrors, errors.TM(ctx.Err(), "request canceled by context during backoff"))
-					return nil, errors.TN(errors.Join(allErrors...))
+					allErrors = append(allErrors, errors.Track(ctx.Err()).
+						WithMessage("request canceled by context during backoff").
+						AsNetwork().Error())
+					return nil, errors.Join(allErrors...)
 				case <-time.After(backoff):
 					// Continue with retry
 				}
@@ -188,30 +191,36 @@ func (h *HTTPService) FetchWithRetries(ctx context.Context, url string, headers 
 
 		// For 4xx client errors, don't retry but return a specific error
 		if resp.StatusCode >= 400 && resp.StatusCode < 500 {
-			// Read the error response body
-			bodyBytes, readErr := io.ReadAll(resp.Body)
-			errorBody := ""
-			if readErr == nil && len(bodyBytes) > 0 {
-				errorBody = string(bodyBytes)
-				if h.Logger != nil {
-					h.Logger.Debug("[HTTP] Error response body: %s", errorBody)
-				}
-			}
-			_ = resp.Body.Close()
-
 			// Create specific error types based on status code
+			var clientErr error
 			switch resp.StatusCode {
 			case http.StatusNotFound:
-				return nil, errors.TN(errors.ErrNotFound)
+				clientErr = errors.Track(fmt.Errorf("resource not found")).
+					WithContext("status_code", resp.StatusCode).
+					WithContext("url", req.URL).
+					AsNetwork().Error()
 			case http.StatusUnauthorized, http.StatusForbidden:
-				return nil, errors.TN(errors.ErrUnauthorized)
+				clientErr = errors.Track(fmt.Errorf("unauthorized access")).
+					WithContext("status_code", resp.StatusCode).
+					WithContext("url", req.URL).
+					AsNetwork().Error()
 			case http.StatusBadRequest:
-				return nil, errors.TN(errors.ErrBadRequest)
+				clientErr = errors.Track(fmt.Errorf("bad request")).
+					WithContext("status_code", resp.StatusCode).
+					WithContext("url", req.URL).
+					AsNetwork().Error()
 			case http.StatusTooManyRequests:
-				return nil, errors.TN(errors.ErrRateLimit)
+				clientErr = errors.Track(fmt.Errorf("rate limit exceeded")).
+					WithContext("status_code", resp.StatusCode).
+					WithContext("url", req.URL).
+					AsRateLimit().Error()
 			default:
-				return nil, errors.TN(errors.ErrBadRequest)
+				clientErr = errors.Track(fmt.Errorf("client error: %d %s", resp.StatusCode, resp.Status)).
+					WithContext("status_code", resp.StatusCode).
+					WithContext("url", req.URL).
+					AsNetwork().Error()
 			}
+			return nil, clientErr
 		}
 
 		// Success - return the response
@@ -224,70 +233,78 @@ func (h *HTTPService) FetchWithRetries(ctx context.Context, url string, headers 
 	}
 
 	// This should rarely happen (if allErrors is empty after retries), but for completeness
-	return nil, errors.TN(fmt.Errorf("HTTP request failed after %d attempts", h.DefaultRetries+1))
+	fallbackErr := errors.Track(fmt.Errorf("HTTP request failed after %d attempts", req.MaxRetries+1)).
+		WithContext("url", req.URL).
+		WithContext("method", req.Method).
+		AsNetwork().Error()
+	return nil, fallbackErr
 }
 
-// FetchJSON fetches and parses JSON with improved error handling
-func (h *HTTPService) FetchJSON(ctx context.Context, url string, result interface{}, headers http.Header) error {
-	if h.Logger != nil {
-		h.Logger.Debug("[HTTP] Fetching JSON from %s", url)
-	}
-
-	resp, err := h.FetchWithRetries(ctx, url, headers)
+// executeRequest performs a single HTTP request
+func (c *Client) executeRequest(ctx context.Context, req *Request) (*Response, error) {
+	// Create HTTP request
+	httpReq, err := http.NewRequestWithContext(ctx, req.Method, req.URL, req.Body)
 	if err != nil {
-		return err // Already wrapped with specific error types
+		return nil, errors.Track(err).
+			WithContext("url", req.URL).
+			WithContext("method", req.Method).
+			AsNetwork().Error()
 	}
 
-	defer func() {
-		if err := resp.Body.Close(); err != nil && h.Logger != nil {
-			h.Logger.Warn("failed to close response body: %v", err)
-		}
-	}()
+	// Set headers (defaults first, then request-specific)
+	for k, v := range c.defaultHeaders {
+		httpReq.Header.Set(k, v)
+	}
+	for k, v := range req.Headers {
+		httpReq.Header.Set(k, v)
+	}
 
-	// Read the body
-	bodyBytes, err := io.ReadAll(resp.Body)
+	// Set timeout
+	if req.Timeout > 0 {
+		ctx, cancel := context.WithTimeout(ctx, req.Timeout)
+		defer cancel()
+		httpReq = httpReq.WithContext(ctx)
+	}
+
+	// Execute request
+	c.logger.Debug("[HTTP] %s request to %s", req.Method, req.URL)
+	httpResp, err := c.http.Do(httpReq)
 	if err != nil {
-		return errors.TN(err)
+		return nil, errors.Track(err).
+			WithContext("url", req.URL).
+			WithContext("method", req.Method).
+			AsNetwork().Error()
 	}
 
-	// Log a sample of the response for debugging
-	if h.Logger != nil {
-		// Only log first 1000 chars to avoid flooding logs
-		sampleSize := 1000
-		if len(bodyBytes) < sampleSize {
-			sampleSize = len(bodyBytes)
-		}
-		h.Logger.Debug("[HTTP] Response body sample (%d bytes): %s", len(bodyBytes), string(bodyBytes[:sampleSize]))
+	// Check for nil response
+	if httpResp == nil {
+		return nil, errors.Track(fmt.Errorf("nil HTTP response received")).
+			WithContext("url", req.URL).
+			WithContext("method", req.Method).
+			AsNetwork().Error()
 	}
 
-	// Parse JSON into the result
-	if err := json.Unmarshal(bodyBytes, result); err != nil {
-		return errors.TN(err)
+	// Create response using the newResponse helper from types.go
+	resp, err := newResponse(httpResp)
+	if err != nil {
+		return nil, err
 	}
 
-	if h.Logger != nil {
-		h.Logger.Debug("[HTTP] Successfully parsed JSON response")
-	}
-
-	return nil
+	c.logger.Debug("[HTTP] %s %s - Status: %d", req.Method, req.URL, resp.StatusCode)
+	return resp, nil
 }
 
-// FetchString fetches content as string
-func (h *HTTPService) FetchString(ctx context.Context, url string, headers http.Header) (string, error) {
-	resp, err := h.FetchWithRetries(ctx, url, headers)
-	if err != nil {
-		return "", err
-	}
-	defer func() {
-		if err := resp.Body.Close(); err != nil && h.Logger != nil {
-			h.Logger.Warn("failed to close response body: %v", err)
-		}
-	}()
+// SetDefaultHeader sets a default header for all requests
+func (c *Client) SetDefaultHeader(key, value string) {
+	c.defaultHeaders[key] = value
+}
 
-	data, err := io.ReadAll(resp.Body)
-	if err != nil {
-		return "", errors.TN(err)
-	}
+// SetDefaultTimeout sets the default timeout for requests
+func (c *Client) SetDefaultTimeout(timeout time.Duration) {
+	c.defaultTimeout = timeout
+}
 
-	return string(data), nil
+// SetDefaultRetries sets the default number of retries
+func (c *Client) SetDefaultRetries(retries int) {
+	c.defaultRetries = retries
 }

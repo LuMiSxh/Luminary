@@ -17,55 +17,53 @@
 package engine
 
 import (
-	"Luminary/pkg/engine/downloader"
+	"Luminary/pkg/core"
+	"Luminary/pkg/engine/download"
 	"Luminary/pkg/engine/logger"
 	"Luminary/pkg/engine/network"
 	"Luminary/pkg/engine/parser"
-	"Luminary/pkg/engine/search"
 	"Luminary/pkg/errors"
-	"Luminary/pkg/provider"
+	"context"
 	"fmt"
-	"net/http"
 	"os"
 	"path/filepath"
-	"regexp"
 	"sync"
-	"time"
 )
+
+// Provider interface that providers must implement
+type Provider interface {
+	ID() string
+	Name() string
+	Description() string
+	SiteURL() string
+
+	Initialize(context.Context) error
+
+	Search(context.Context, string, core.SearchOptions) ([]core.Manga, error)
+	GetManga(context.Context, string) (*core.MangaInfo, error)
+	GetChapter(context.Context, string) (*core.Chapter, error)
+	TryGetMangaForChapter(context.Context, string) (*core.Manga, error)
+	DownloadChapter(context.Context, string, string) error
+}
 
 // Engine is the central component providing services to providers
 type Engine struct {
-	HTTP        *network.HTTPService
-	Download    *downloader.DownloadService
-	Parser      *parser.Service
-	RateLimiter *network.RateLimiterService
-	DOM         *parser.DOMService
-	Metadata    *parser.MetadataService
-	Logger      *logger.Service
-	API         *network.APIService
-	Extractor   *parser.ExtractorService
-	Pagination  *search.PaginationService
-	Search      *search.Service
-	WebScraper  *network.WebScraperService
+	// Core services (reduced from 11 to 4)
+	Network  *network.Client
+	Parser   *parser.Service
+	Download *download.Service
+	Logger   logger.Logger
 
 	// Provider registry
-	providers     map[string]provider.Provider
+	providers     map[string]Provider
 	providerMutex sync.RWMutex
+
+	// Error formatting options
+	debugMode bool
 }
 
 // New creates a new Engine with default configuration
 func New() *Engine {
-	// Create basic services first
-	parserService := &parser.Service{
-		RegexPatterns: map[string]*regexp.Regexp{
-			"chapterNumber": regexp.MustCompile(`(?i)(?:chapter|ch\.?|vol\.?|episode|ep\.?)[\s:]*(\d+(?:\.\d+)?)`),
-			"volumeNumber":  regexp.MustCompile(`(?i)(?:volume|vol\.?)[\s:]*(\d+)`),
-			"title":         regexp.MustCompile(`(?i)<title>(.*?)</title>`),
-			"mangaTitle":    regexp.MustCompile(`(?i)(?:manga|comic|series|title)[\s:]*([^,\r\n]+)`),
-			"authorName":    regexp.MustCompile(`(?i)(?:author|artist|creator|mangaka)[\s:]*([^,\r\n]+)`),
-		},
-	}
-
 	// Determine default log file
 	logFile := ""
 	if homeDir, err := os.UserHomeDir(); err == nil {
@@ -75,122 +73,78 @@ func New() *Engine {
 		}
 	}
 
-	// Create logger service first so we can use it in other services
-	loggerService := logger.NewService(logFile)
+	// Create logger first
+	log := logger.NewService(logFile)
 
-	// Create HTTP service with logger
-	httpService := &network.HTTPService{
-		DefaultClient: &http.Client{
-			Timeout: 30 * time.Second,
-			Transport: &http.Transport{
-				MaxIdleConns:        100,
-				MaxIdleConnsPerHost: 20,
-				IdleConnTimeout:     90 * time.Second,
-				DisableCompression:  false,
-			},
-		},
-		RequestOptions: network.RequestOptions{
-			Headers:         make(http.Header),
-			UserProvider:    "Luminary/1.0",
-			Method:          "GET",
-			FollowRedirects: true,
-		},
-		DefaultRetries:     3,
-		DefaultTimeout:     30 * time.Second,
-		ThrottleTimeAPI:    2 * time.Second,
-		ThrottleTimeImages: 500 * time.Millisecond,
-		Logger:             loggerService,
-	}
+	// Create simplified services
+	networkClient := network.NewClient(log)
+	parserService := parser.NewService(log)
+	downloadService := download.NewService(networkClient, log)
 
-	// Set common headers
-	httpService.RequestOptions.Headers.Set("Accept", "text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8")
-	httpService.RequestOptions.Headers.Set("Accept-Language", "en-US,en;q=0.5")
-
-	// Create download service
-	downloadService := &downloader.DownloadService{
-		Throttle:     500 * time.Millisecond,
-		OutputFormat: "png",
-		Client:       httpService.DefaultClient,
-		Logger:       loggerService,
-	}
-
-	// Create rate limiter service with logger
-	rateLimiterService := network.NewRateLimiterService(2*time.Second, loggerService)
-
-	// Create DOM service
-	domService := &parser.DOMService{}
-
-	// Create engine with all services
 	engine := &Engine{
-		HTTP:        httpService,
-		Download:    downloadService,
-		Parser:      parserService,
-		RateLimiter: rateLimiterService,
-		DOM:         domService,
-		Logger:      loggerService,
-		providers:   make(map[string]provider.Provider),
+		Network:   networkClient,
+		Parser:    parserService,
+		Download:  downloadService,
+		Logger:    log,
+		providers: make(map[string]Provider),
 	}
 
-	// Create metadata service (depends on parser)
-	engine.Metadata = &parser.MetadataService{
-		Parser: parserService,
-	}
-
-	// Create API service with logger
-	engine.API = network.NewAPIService(httpService, rateLimiterService, loggerService)
-
-	// Create the extractor service with logger
-	engine.Extractor = parser.NewExtractorService(loggerService)
-
-	// Create the pagination service with dependencies
-	engine.Pagination = search.NewPaginationService(engine.API, engine.Extractor, loggerService)
-
-	// Create the search service with dependencies and logger
-	engine.Search = search.NewSearchService(
-		loggerService,
-		engine.API,
-		engine.Extractor,
-		engine.Pagination,
-		rateLimiterService,
-	)
-
-	// Create the WebScraper service
-	engine.WebScraper = network.NewWebScraperService(httpService, domService, rateLimiterService, loggerService)
-
-	loggerService.Info("Engine initialized successfully")
+	log.Info("Engine initialized successfully")
 	return engine
 }
 
 // RegisterProvider adds a provider to the registry
-func (e *Engine) RegisterProvider(provider provider.Provider) error {
+func (e *Engine) RegisterProvider(provider Provider) error {
+	if provider == nil {
+		return errors.Track(fmt.Errorf("provider is nil")).Error()
+	}
+
 	e.providerMutex.Lock()
 	defer e.providerMutex.Unlock()
 
-	if _, exists := e.providers[provider.ID()]; exists {
-		return errors.T(fmt.Errorf("provider with ID '%s' already registered", provider.ID()))
+	id := provider.ID()
+	if id == "" {
+		return errors.Track(fmt.Errorf("provider has empty ID")).Error()
 	}
 
-	e.providers[provider.ID()] = provider
+	if _, exists := e.providers[id]; exists {
+		return errors.Track(fmt.Errorf("provider with ID '%s' already registered", id)).Error()
+	}
+
+	e.providers[id] = provider
+	e.Logger.Info("Registered provider: %s (%s)", provider.Name(), id)
 	return nil
 }
 
 // GetProvider retrieves a registered provider by ID
-func (e *Engine) GetProvider(id string) (provider.Provider, bool) {
+func (e *Engine) GetProvider(id string) (Provider, error) {
 	e.providerMutex.RLock()
 	defer e.providerMutex.RUnlock()
 
-	foundProvider, exists := e.providers[id]
-	return foundProvider, exists
+	provider, exists := e.providers[id]
+	if !exists {
+		return nil, errors.Track(fmt.Errorf("provider '%s' not found", id)).
+			WithContext("available_providers", e.getProviderIDs()).Error()
+	}
+
+	return provider, nil
 }
 
-// AllProvider returns all registered providers
-func (e *Engine) AllProvider() []provider.Provider {
+// GetProviderOrNil retrieves a provider or returns nil if not found
+func (e *Engine) GetProviderOrNil(id string) Provider {
+	e.providerMutex.RLock()
+	defer e.providerMutex.RUnlock()
+	return e.providers[id]
+}
+
+// AllProviders returns all registered providers
+func (e *Engine) AllProviders() []Provider {
 	e.providerMutex.RLock()
 	defer e.providerMutex.RUnlock()
 
-	providers := make([]provider.Provider, 0, len(e.providers))
-	for _, a := range e.providers {
-		providers = append(providers, a)
+	providers := make([]Provider, 0, len(e.providers))
+	for _, p := range e.providers {
+		providers = append(providers, p)
 	}
 	return providers
 }
@@ -199,7 +153,76 @@ func (e *Engine) AllProvider() []provider.Provider {
 func (e *Engine) ProviderExists(id string) bool {
 	e.providerMutex.RLock()
 	defer e.providerMutex.RUnlock()
-
 	_, exists := e.providers[id]
 	return exists
+}
+
+// ProviderCount returns the number of registered providers
+func (e *Engine) ProviderCount() int {
+	e.providerMutex.RLock()
+	defer e.providerMutex.RUnlock()
+	return len(e.providers)
+}
+
+// InitializeProviders initializes all registered providers
+func (e *Engine) InitializeProviders(ctx context.Context) error {
+	providers := e.AllProviders()
+
+	for _, provider := range providers {
+		if err := provider.Initialize(ctx); err != nil {
+			e.Logger.Error("Failed to initialize provider %s: %v", provider.ID(), err)
+			// Continue with other providers
+		}
+	}
+
+	return nil
+}
+
+// Shutdown gracefully shuts down the engine
+func (e *Engine) Shutdown() error {
+	e.Logger.Info("Shutting down engine...")
+
+	// Close logger
+	if closer, ok := e.Logger.(interface{ Close() error }); ok {
+		return closer.Close()
+	}
+
+	return nil
+}
+
+// getProviderIDs returns a list of all provider IDs
+func (e *Engine) getProviderIDs() []string {
+	ids := make([]string, 0, len(e.providers))
+	for id := range e.providers {
+		ids = append(ids, id)
+	}
+	return ids
+}
+
+// SetDebugMode enables or disables debug mode for error formatting
+func (e *Engine) SetDebugMode(enabled bool) {
+	e.debugMode = enabled
+
+	// Update log level
+	if enabled {
+		e.Logger.SetLevel(logger.LevelDebug)
+		e.Logger.Debug("Debug mode enabled")
+	} else {
+		e.Logger.SetLevel(logger.LevelInfo)
+	}
+}
+
+// FormatError formats an error based on the current verbosity settings
+func (e *Engine) FormatError(err error) string {
+	if err == nil {
+		return ""
+	}
+
+	if e.debugMode {
+		// When debug is enabled, show full tracked error with details
+		return errors.FormatCLIDebug(err)
+	} else {
+		// Default simple format
+		return errors.FormatCLISimple(err)
+	}
 }
