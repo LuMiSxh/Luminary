@@ -14,48 +14,71 @@
 // You should have received a copy of the GNU General Public License
 // along with this program. If not, see <http://www.gnu.org/licenses/>.
 
+// cmd/luminary/main.go
 package main
 
 import (
-	"Luminary/internal/commands"
-	"Luminary/internal/providers"
+	"Luminary/internal/cli"
+	_ "Luminary/internal/providers" // Import for side effects (auto-registration)
 	"Luminary/pkg/engine"
+	"Luminary/pkg/provider/registry"
+	"context"
+	"fmt"
+	"os"
+	"os/signal"
+	"syscall"
 )
 
-// Version is set during build using -ldflags
-var Version = "0.0.0-dev"
-
-// registerProviders registers all available manga source providers with the engine
-func registerProviders(e *engine.Engine) {
-	// Register MangaDex provider
-	err := e.RegisterProvider(providers.NewMangadexProvider(e))
-	if err != nil {
-		e.Logger.Error("Failed to register MangaDex provider: %v", err)
-	}
-
-	// Register KissManga provider
-	err = e.RegisterProvider(providers.NewMadaraProvider(e))
-	if err != nil {
-		e.Logger.Error("Failed to register KissManga provider: %v", err)
-	}
-}
+var (
+	Version = "dev"
+)
 
 func main() {
-	// Initialize the engine
-	e := engine.New()
+	// Create engine
+	eng := engine.New()
+	defer func(eng *engine.Engine) {
+		err := eng.Shutdown()
+		if err != nil {
 
-	// Register all providers
-	registerProviders(e)
+		}
+	}(eng)
 
-	// Make the engine available to commands
-	commands.SetupEngine(e)
+	// Load all registered providers
+	if err := registry.LoadAll(eng); err != nil {
+		eng.Logger.Error("Failed to load providers: %v", err)
+		os.Exit(1)
+	}
 
-	// Set the version for the root command
-	commands.SetupVersion(Version)
+	// Initialize providers
+	ctx := context.Background()
+	if err := eng.InitializeProviders(ctx); err != nil {
+		eng.Logger.Error("Failed to initialize providers: %v", err)
+		// Continue anyway - some providers might have initialized successfully
+	}
 
-	// Enable debug mode if needed
-	commands.SetupDebugMode()
+	// Set up signal handling
+	sigChan := make(chan os.Signal, 1)
+	signal.Notify(sigChan, os.Interrupt, syscall.SIGTERM)
 
-	// Execute the root command
-	commands.Execute()
+	go func() {
+		<-sigChan
+		eng.Logger.Info("Received interrupt signal, shutting down...")
+		err := eng.Shutdown()
+		if err != nil {
+			return
+		}
+		os.Exit(0)
+	}()
+
+	// Create CLI app
+	app := cli.NewApp(eng, Version)
+
+	// Run CLI
+	if err := app.Run(os.Args); err != nil {
+		_, err := fmt.Fprintf(os.Stderr, "Error: %v\n", err)
+		if err != nil {
+			return
+		}
+		os.Exit(1)
+	}
 }

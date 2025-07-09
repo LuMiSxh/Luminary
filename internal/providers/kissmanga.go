@@ -2,32 +2,47 @@ package providers
 
 import (
 	"Luminary/pkg/engine"
-	"Luminary/pkg/provider"
-	"Luminary/pkg/provider/madara"
+	"Luminary/pkg/provider/base"
+	"Luminary/pkg/provider/registry"
+	"time"
 )
 
-// NewMadaraProvider creates a new KissManga provider using the Madara framework
-func NewMadaraProvider(e *engine.Engine) provider.Provider {
-	// Configure KissManga-specific settings using the Madara framework
-	config := madara.Config{
-		ID:              "kmg",
-		Name:            "KissManga",
-		SiteURL:         "https://kissmanga.in",
-		Description:     "Read manga online for free at KissManga with daily updates",
-		MangaSelector:   "div.post-title h3 a, div.post-title h5 a",
-		ChapterSelector: "li.wp-manga-chapter > a, .chapter-link, div.listing-chapters_wrap a, .wp-manga-chapter a",
-		PageSelector:    "div.page-break source, div.page-break img, .reading-content img",
+func init() {
+	registry.Register(NewKissMangaProvider)
+}
+
+// NewKissMangaProvider creates a new KissManga provider using the simplified framework
+func NewKissMangaProvider(e *engine.Engine) engine.Provider {
+	return base.New(e, base.Config{
+		ID:          "kmg",
+		Name:        "KissManga",
+		Description: "Read manga online for free at KissManga with daily updates",
+		SiteURL:     "https://kissmanga.in",
+		Type:        base.TypeMadara,
+
+		Madara: &base.MadaraConfig{
+			Selectors: map[string]string{
+				"search":      "div.post-title h3 a, div.post-title h5 a",
+				"title":       "h1.post-title, .post-title-font",
+				"description": ".description-summary, .summary__content",
+				"chapters":    "li.wp-manga-chapter > a, .chapter-link",
+				"pages":       "div.page-break img, .reading-content img",
+				"author":      ".author-content a, .manga-authors a",
+				"status":      ".post-status .summary-content",
+				"genres":      ".genres-content a",
+			},
+			AjaxSearch:       true,
+			CustomLoadAction: "madara_load_more",
+		},
+
 		Headers: map[string]string{
-			"User-Provider":   "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/98.0.4758.102 Safari/537.36",
-			"Accept":          "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.9",
+			"User-Agent":      "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
+			"Accept":          "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
 			"Accept-Language": "en-US,en;q=0.9",
 			"Cache-Control":   "no-cache",
-			"Connection":      "keep-alive",
-			"Pragma":          "no-cache",
 			"Referer":         "https://kissmanga.in/",
 		},
-	}
 
-	// Create the Madara provider with our custom configuration
-	return madara.NewProvider(e, config)
+		RateLimit: 2 * time.Second,
+	}).Build()
 }

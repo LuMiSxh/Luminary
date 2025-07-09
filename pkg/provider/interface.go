@@ -17,11 +17,11 @@
 package provider
 
 import (
-	"Luminary/pkg/engine/core"
+	"Luminary/pkg/core"
 	"context"
 )
 
-// Provider defines the interface for manga sources
+// Provider defines the interface all manga providers must implement
 type Provider interface {
 	ID() string
 	Name() string

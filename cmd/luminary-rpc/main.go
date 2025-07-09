@@ -17,25 +17,39 @@
 package main
 
 import (
-	"Luminary/internal/providers"
-	"Luminary/internal/rpc" // Internal RPC services
+	_ "Luminary/internal/providers" // Import for side effects (auto-registration)
+	"Luminary/internal/rpc"
 	"Luminary/pkg/engine"
+	"Luminary/pkg/provider/registry"
 	"bufio"
+	"context"
+	"fmt"
 	"io"
-	"log"
-	gorpc "net/rpc" // Alias for Go's standard RPC package
 	"net/rpc/jsonrpc"
 	"os"
+	"os/signal"
+	"runtime"
+	"syscall"
 )
 
-// Version is set during build using -ldflags
-var Version = "0.0.0-dev"
+var (
+	Version = "dev"
+)
 
-// stdInOutReadWriteCloser adapts os.Stdin and os.Stdout to io.ReadWriteCloser.
+// GetRuntimeInfo returns runtime information
+func GetRuntimeInfo() rpc.RuntimeInfo {
+	return rpc.RuntimeInfo{
+		GoVersion: runtime.Version(),
+		OS:        runtime.GOOS,
+		Arch:      runtime.GOARCH,
+	}
+}
+
+// stdInOutReadWriteCloser wraps stdin/stdout for JSON-RPC
 type stdInOutReadWriteCloser struct {
-	reader io.Reader // Use io.Reader for flexibility, will be a *bufio.Reader for stdin
+	reader io.Reader
 	writer io.Writer
-	closer io.Closer // Optional closer
+	closer io.Closer
 }
 
 func (s *stdInOutReadWriteCloser) Read(p []byte) (n int, err error) {
@@ -44,13 +58,14 @@ func (s *stdInOutReadWriteCloser) Read(p []byte) (n int, err error) {
 
 func (s *stdInOutReadWriteCloser) Write(p []byte) (n int, err error) {
 	n, err = s.writer.Write(p)
-	if err != nil {
-		return n, err
-	}
-	// Attempt to flush if writer supports it (e.g., *os.File)
-	// This is important for interactive use or when piping.
-	if f, ok := s.writer.(interface{ Sync() error }); ok {
-		_ = f.Sync() // Best effort, ignore error as not much can be done.
+	if err == nil {
+		// Ensure output is flushed
+		if flusher, ok := s.writer.(interface{ Flush() error }); ok {
+			err := flusher.Flush()
+			if err != nil {
+				return 0, err
+			}
+		}
 	}
 	return n, err
 }
@@ -59,79 +74,69 @@ func (s *stdInOutReadWriteCloser) Close() error {
 	if s.closer != nil {
 		return s.closer.Close()
 	}
-	// Stdin/Stdout are not typically closed by the application.
 	return nil
-}
-
-// registerProviders registers all available manga source providers with the engine.
-// This function should mirror the provider registration in your CLI's main.go.
-func registerProviders(e *engine.Engine) {
-	// Example: Register MangaDex provider
-	// Ensure NewMangadexProvider and other provider constructors are accessible
-	// from the 'internal/providers' package.
-	if err := e.RegisterProvider(providers.NewMangadexProvider(e)); err != nil {
-		e.Logger.Error("Failed to register MangaDex provider in RPC: %v", err)
-	}
-
-	// Example: Register Madara provider (KissManga was an example name)
-	if err := e.RegisterProvider(providers.NewMadaraProvider(e)); err != nil {
-		e.Logger.Error("Failed to register Madara provider in RPC: %v", err)
-	}
-	// Add other providers here as needed
 }
 
 func main() {
 	// Initialize the Luminary engine
 	appEngine := engine.New()
+	defer func(appEngine *engine.Engine) {
+		err := appEngine.Shutdown()
+		if err != nil {
 
-	// Register all available providers
-	registerProviders(appEngine)
+		}
+	}(appEngine)
 
-	// Create the main services container, passing the engine and version
-	rpcServicesContainer := rpc.NewServices(appEngine, Version)
-
-	// Instantiate individual services, passing the container
-	versionService := &rpc.VersionService{Services: rpcServicesContainer}
-	providersService := &rpc.ProvidersService{Services: rpcServicesContainer}
-	searchService := &rpc.SearchService{Services: rpcServicesContainer}
-	infoService := &rpc.InfoService{Services: rpcServicesContainer}
-	downloadService := &rpc.DownloadService{Services: rpcServicesContainer}
-	listService := &rpc.ListService{Services: rpcServicesContainer}
-
-	// Register services with the Go RPC server
-	// It's conventional to use "ServiceName.MethodName" for JSON-RPC.
-	// The `RegisterName` method allows specifying the service name.
-	server := gorpc.NewServer()
-	if err := server.RegisterName("VersionService", versionService); err != nil {
-		log.Fatalf("RPC: Failed to register VersionService: %v", err)
-	}
-	if err := server.RegisterName("ProvidersService", providersService); err != nil {
-		log.Fatalf("RPC: Failed to register ProvidersService: %v", err)
-	}
-	if err := server.RegisterName("SearchService", searchService); err != nil {
-		log.Fatalf("RPC: Failed to register SearchService: %v", err)
-	}
-	if err := server.RegisterName("InfoService", infoService); err != nil {
-		log.Fatalf("RPC: Failed to register InfoService: %v", err)
-	}
-	if err := server.RegisterName("DownloadService", downloadService); err != nil {
-		log.Fatalf("RPC: Failed to register DownloadService: %v", err)
-	}
-	if err := server.RegisterName("ListService", listService); err != nil {
-		log.Fatalf("RPC: Failed to register ListService: %v", err)
+	// Load all registered providers
+	if err := registry.LoadAll(appEngine); err != nil {
+		appEngine.Logger.Error("Failed to load providers: %v", err)
+		// Continue anyway - we can still serve RPC without providers
 	}
 
-	// Set up communication over stdin/stdout
-	// Use a buffered reader for stdin for efficiency.
-	codec := jsonrpc.NewServerCodec(&stdInOutReadWriteCloser{
+	// Initialize providers
+	ctx := context.Background()
+	if err := appEngine.InitializeProviders(ctx); err != nil {
+		appEngine.Logger.Error("Failed to initialize providers: %v", err)
+		// Continue anyway
+	}
+
+	// Set up signal handling
+	sigChan := make(chan os.Signal, 1)
+	signal.Notify(sigChan, os.Interrupt, syscall.SIGTERM)
+
+	go func() {
+		<-sigChan
+		appEngine.Logger.Info("RPC server shutting down...")
+		err := appEngine.Shutdown()
+		if err != nil {
+			return
+		}
+		os.Exit(0)
+	}()
+
+	// Create the RPC server with services
+	rpcServer := rpc.NewServer(appEngine, Version)
+
+	// Set up JSON-RPC over stdin/stdout
+	rwc := &stdInOutReadWriteCloser{
 		reader: bufio.NewReader(os.Stdin),
 		writer: os.Stdout,
-	})
+	}
 
-	appEngine.Logger.Info("Starting RPC Server on stdin/stdout")
+	// Log startup
+	appEngine.Logger.Info("Luminary RPC server v%s started", Version)
+	appEngine.Logger.Info("Loaded %d providers", appEngine.ProviderCount())
 
-	// Start serving RPC requests. This will block.
-	server.ServeCodec(codec)
+	// Log initial status to stderr (won't interfere with JSON-RPC)
+	_, err := fmt.Fprintf(os.Stderr, "Luminary RPC v%s ready with %d providers\n", Version, appEngine.ProviderCount())
+	if err != nil {
+		return
+	}
 
-	appEngine.Logger.Info("RPC Server exited normally")
+	// Start serving JSON-RPC (this blocks)
+	codec := jsonrpc.NewServerCodec(rwc)
+	rpcServer.ServeCodec(codec)
+
+	// If we get here, the connection was closed
+	appEngine.Logger.Info("RPC connection closed")
 }
