@@ -65,12 +65,11 @@ func NewSearchCommand(eng *engine.Engine) cli.ActionFunc {
 		provider := c.String("provider")
 		limit := c.Int("limit")
 
-		fields := c.String("fields")
 		filter := c.String("filter")
 		sort := c.String("sort")
 
-		eng.Logger.Debug("Search parameters: query=%s, provider=%s, limit=%d, fields=%s, filter=%s, sort=%s",
-			query, provider, limit, fields, filter, sort)
+		eng.Logger.Debug("Search parameters: query=%s, provider=%s, limit=%d, filter=%s, sort=%s",
+			query, provider, limit, filter, sort)
 
 		options := core.SearchOptions{
 			Query: query,
@@ -78,18 +77,12 @@ func NewSearchCommand(eng *engine.Engine) cli.ActionFunc {
 			Pages: 1,
 		}
 
-		// Add fields if specified
-		if fields != "" {
-			options.Fields = strings.Split(fields, ",")
-			eng.Logger.Debug("Using fields: %v", options.Fields)
-		}
-
 		// Add filters if specified
 		if filter != "" {
-			// Simple parsing for filter string
+			// Parse filter string
 			eng.Logger.Debug("Filter string: %s", filter)
-			// TODO: Implement filter parsing and add it to core.SearchOptions.Filters
-			//	The Filters are also not really used in the core.SearchOptions struct so we have to implement that as well
+			options.Filters = parseFilterString(filter)
+			eng.Logger.Debug("Parsed filters: %v", options.Filters)
 		}
 
 		// Add sort if specified
@@ -408,6 +401,56 @@ func filterChaptersByLanguage(chapters []core.ChapterInfo, languages []string) [
 	}
 
 	return filtered
+}
+
+// parseFilterString parses a filter string in the format key=value,key2="value with spaces"
+// and returns a map of filter keys to values
+func parseFilterString(filter string) map[string]interface{} {
+	result := make(map[string]interface{})
+
+	// Split by commas, but respect quoted values
+	var parts []string
+	inQuotes := false
+	lastStart := 0
+
+	for i, c := range filter {
+		if c == '"' {
+			inQuotes = !inQuotes
+		} else if c == ',' && !inQuotes {
+			parts = append(parts, filter[lastStart:i])
+			lastStart = i + 1
+		}
+	}
+
+	// Add the last part
+	if lastStart < len(filter) {
+		parts = append(parts, filter[lastStart:])
+	}
+
+	// Process each part as a key=value pair
+	for _, part := range parts {
+		part = strings.TrimSpace(part)
+		if part == "" {
+			continue
+		}
+
+		kv := strings.SplitN(part, "=", 2)
+		if len(kv) != 2 {
+			continue // Skip invalid filters
+		}
+
+		key := strings.TrimSpace(kv[0])
+		value := strings.TrimSpace(kv[1])
+
+		// Remove quotes if present
+		if len(value) >= 2 && strings.HasPrefix(value, "\"") && strings.HasSuffix(value, "\"") {
+			value = value[1 : len(value)-1]
+		}
+
+		result[key] = value
+	}
+
+	return result
 }
 
 // formatDuration formats a duration in a human-readable format

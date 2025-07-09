@@ -68,7 +68,6 @@ type SearchOptions struct {
 	Limit            int                    `json:"limit"`
 	Pages            int                    `json:"pages"`
 	Sort             string                 `json:"sort,omitempty"`
-	Fields           []string               `json:"fields,omitempty"`
 	Filters          map[string]interface{} `json:"filters,omitempty"`
 	IncludeAltTitles bool                   `json:"include_alt_titles,omitempty"`
 	Concurrency      int                    `json:"concurrency,omitempty"`

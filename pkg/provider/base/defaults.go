@@ -50,6 +50,15 @@ func (p *Provider) defaultAPISearch(ctx context.Context, query string, options c
 	if options.Limit > 0 {
 		q.Set("limit", fmt.Sprintf("%d", options.Limit))
 	}
+
+	// Apply filters if provided
+	if options.Filters != nil && len(options.Filters) > 0 {
+		for key, value := range options.Filters {
+			// Use standard key=value format for filters
+			q.Set(key, fmt.Sprintf("%v", value))
+		}
+	}
+
 	u.RawQuery = q.Encode()
 
 	// Make request
@@ -141,6 +150,23 @@ func (p *Provider) defaultWebSearch(ctx context.Context, query string, options c
 		searchURL = p.Config.SiteURL + "/?s=" + url.QueryEscape(query) + "&post_type=wp-manga"
 	} else {
 		searchURL = p.Config.SiteURL + "/search?q=" + url.QueryEscape(query)
+	}
+
+	// Add filters to the search URL if provided
+	if options.Filters != nil && len(options.Filters) > 0 {
+		// Check if we need to add query parameters
+		if !strings.Contains(searchURL, "?") {
+			searchURL += "?"
+		} else if !strings.HasSuffix(searchURL, "&") {
+			searchURL += "&"
+		}
+
+		params := url.Values{}
+		for key, value := range options.Filters {
+			params.Add(key, fmt.Sprintf("%v", value))
+		}
+
+		searchURL += params.Encode()
 	}
 
 	// Make request

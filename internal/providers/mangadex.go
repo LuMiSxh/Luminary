@@ -12,6 +12,7 @@ import (
 	"fmt"
 	"net/url"
 	"strconv"
+	"strings"
 	"time"
 )
 
@@ -341,10 +342,91 @@ func formatSearchQuery(query string, options core.SearchOptions) url.Values {
 	p.Set("title", query)
 	p.Set("limit", strconv.Itoa(options.Limit))
 	p.Add("order[relevance]", "desc")
-	// Include a wide range of content ratings
-	for _, rating := range []string{"safe", "suggestive", "erotica", "pornographic"} {
-		p.Add("contentRating[]", rating)
+
+	// Check if we have any filters
+	if options.Filters != nil && len(options.Filters) > 0 {
+		// Track if specific filter types are set so we can apply defaults later if needed
+		hasContentRating := false
+
+		// Process each filter
+		for key, value := range options.Filters {
+			strValue := fmt.Sprintf("%v", value)
+
+			// Handle MangaDex-specific filters
+			switch key {
+			case "genre", "tag", "tags":
+				// Handle includedTags[] (genres/tags)
+				tags := strings.Split(strValue, ",")
+				for _, tag := range tags {
+					p.Add("includedTags[]", strings.TrimSpace(tag))
+				}
+
+			case "excludeGenre", "excludeTag", "excludeTags":
+				// Handle excludedTags[]
+				tags := strings.Split(strValue, ",")
+				for _, tag := range tags {
+					p.Add("excludedTags[]", strings.TrimSpace(tag))
+				}
+
+			case "status":
+				// Handle status[] (ongoing, completed, hiatus, cancelled)
+				statuses := strings.Split(strValue, ",")
+				for _, status := range statuses {
+					p.Add("status[]", strings.TrimSpace(status))
+				}
+
+			case "contentRating", "rating":
+				// Handle contentRating[] (safe, suggestive, erotica, pornographic)
+				hasContentRating = true
+				ratings := strings.Split(strValue, ",")
+				for _, rating := range ratings {
+					p.Add("contentRating[]", strings.TrimSpace(rating))
+				}
+
+			case "originalLanguage", "language", "lang":
+				// Handle originalLanguage[]
+				langs := strings.Split(strValue, ",")
+				for _, lang := range langs {
+					p.Add("originalLanguage[]", strings.TrimSpace(lang))
+				}
+
+			case "author", "authors":
+				// Handle authors[]
+				authors := strings.Split(strValue, ",")
+				for _, author := range authors {
+					p.Add("authors[]", strings.TrimSpace(author))
+				}
+
+			case "artist", "artists":
+				// Handle artists[]
+				artists := strings.Split(strValue, ",")
+				for _, artist := range artists {
+					p.Add("artists[]", strings.TrimSpace(artist))
+				}
+
+			case "year":
+				// Publication year
+				p.Set("year", strValue)
+
+			default:
+				// Pass through other filters directly
+				p.Add(key, strValue)
+			}
+		}
+
+		// Apply default content ratings if not explicitly specified
+		if !hasContentRating {
+			for _, rating := range []string{"safe", "suggestive"} {
+				p.Add("contentRating[]", rating)
+			}
+		}
+	} else {
+		// No filters specified, use default content ratings
+		for _, rating := range []string{"safe", "suggestive"} {
+			p.Add("contentRating[]", rating)
+		}
 	}
+
 	return p
 }
 
